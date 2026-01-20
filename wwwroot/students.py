@@ -3,6 +3,7 @@
 import cgi
 import mysql.connector
 import html
+import traceback
 
 print("Content-Type: text/html\n")
 
@@ -31,11 +32,15 @@ try:
     # allow execution of sql queries
     cursor = conn.cursor()
 
+    # don't use auto increment lol...
+    cursor.execute("SELECT COALESCE(MAX(studid), 999) + 1 FROM students")
+    next_studid = cursor.fetchone()[0]
+
     # crud operations 
     if action == "insert" and studname and studaddress and studcourse and studgender and yearlevel:
         cursor.execute(
-            "INSERT INTO students (studname, studadd, studcrs, studgender, yrlvl) VALUES (%s, %s, %s, %s, %s)",
-            (studname, studaddress, studcourse, studgender, yearlevel)
+            "INSERT INTO students (studid, studname, studadd, studcrs, studgender, yrlvl) VALUES (%s, %s, %s, %s, %s, %s)",
+            (next_studid, studname, studaddress, studcourse, studgender, yearlevel)
         )
         conn.commit()
 
@@ -54,7 +59,7 @@ try:
         cursor.execute(
             # ignore will silently ignore duplicate enrolls
             "INSERT IGNORE INTO enroll (studid, subjid, evaluation) VALUES (%s, %s, NULL)",
-            (studid, selected_subjid)
+            (next_studid, selected_subjid)
         )
         conn.commit()
 
@@ -63,7 +68,7 @@ try:
     cursor.execute("SELECT studid, studname, studadd, studcrs, studgender, yrlvl FROM students")
     rows = cursor.fetchall()
 
-    # get the selected student
+    # bandaid fix for window.location.href reloading the site after the input fields are populated
     selectedstudent = None
     if studid:
         cursor.execute(
@@ -72,7 +77,6 @@ try:
         )
         selectedstudent = cursor.fetchone()
 
-    # bandaid fix for window.location.href reloading the site after the input fields are populated
     if selectedstudent:
         studid_val = str(selectedstudent[0])
         studname_val = html.escape(selectedstudent[1])
@@ -81,10 +85,9 @@ try:
         studgender_val = html.escape(selectedstudent[4])
         yearlevel_val = str(selectedstudent[5])
     else:
-        studid_val = studname_val = studaddress_val = studcourse_val = studgender_val = ""
-        yearlevel_val = ""
+        studid_val = studname_val = studaddress_val = studcourse_val = studgender_val = yearlevel_val = ""
 
-    # get the data to populated the enrolled subjects table for the selected student
+    # get the data to populate the enrolled subjects table for the selected student
     enrolledsubjects = []
     if studid:
         cursor.execute(
@@ -285,14 +288,14 @@ try:
     </html>
     """)
 
-# prevent blank pages, displays database/runtime errors if there are any
-except Exception as e:
+# displays database/runtime errors if there are any, shows line number of error
+except Exception:
+    tb = traceback.format_exc()
     print("<h2>Error</h2>")
-    print(f"<pre>{e}</pre>")
+    print(f"<pre>{tb}</pre>")
 
 # ensure database connection is closed
 finally:
     if 'conn' in locals():
         conn.close()
-
 
