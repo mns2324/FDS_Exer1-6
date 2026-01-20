@@ -3,14 +3,15 @@
 import cgi
 import mysql.connector
 import html
+import traceback
 
 print("Content-Type: text/html\n")
 
 form = cgi.FieldStorage()
 action = form.getvalue("action", "")
 
-subjid = form.getvalue("subjid", "")
-selected_subjid = form.getvalue("subjid")
+studid = form.getvalue("studid", "")
+subjid, selected_subjid = form.getvalue("subjid", ""), form.getvalue("subjid", "")
 
 subjcode = html.escape(form.getvalue("subjcode", ""))
 subjdesc = html.escape(form.getvalue("subjdesc", ""))
@@ -29,11 +30,15 @@ try:
     # allow execution of sql queries
     cursor = conn.cursor()
 
+    # don't use auto increment lol...
+    cursor.execute("SELECT COALESCE(MAX(subjid), 1999) + 1 FROM subjects")
+    next_subjid = cursor.fetchone()[0]
+
     # insert, update, delete to sql
     if action == "insert" and subjcode and subjdesc and subjunits and subjsched:
         cursor.execute(
-            "INSERT INTO subjects (subjcode, subjdesc, subjunits, subjsched) VALUES (%s, %s, %s, %s)",
-            (subjcode, subjdesc, subjunits, subjsched)
+            "INSERT INTO subjects (subjid, subjcode, subjdesc, subjunits, subjsched) VALUES (%s, %s, %s, %s, %s)",
+            (next_subjid, subjcode, subjdesc, subjunits, subjsched)
         )
         conn.commit()
 
@@ -48,15 +53,32 @@ try:
         cursor.execute( "DELETE FROM subjects WHERE subjid=%s", (subjid,) )
         conn.commit()
 
-    # read all records from subjects
-    cursor.execute("SELECT subjid, subjcode, subjdesc, subjunits, subjsched FROM subjects")
+    # read all records from subjects, even those with no enrollees
+    cursor.execute("""
+        SELECT 
+            s.subjid,
+            s.subjcode,
+            s.subjdesc,
+            s.subjunits,
+            s.subjsched,
+            COUNT(e.studid) AS enrolledcount
+        FROM subjects s
+        LEFT JOIN enroll e ON e.subjid = s.subjid
+        GROUP BY s.subjid
+    """)
     rows = cursor.fetchall()
     
-    # show what subject id is currently selected
+    # show what subject id is currently selected + update table to show # of students
     if selected_subjid:
         heading = f"Students Enrolled in Subject ID: {html.escape(selected_subjid)}"
+        cursor.execute(
+            "SELECT COUNT(*) FROM enroll WHERE subjid = %s",
+            (selected_subjid,)
+        )
+        studenrolledcount = cursor.fetchone()[0]
     else:
         heading = "Students Enrolled in Subject ID: (not selected yet)"
+        studenrolledcount = 0
 
     print("""
     <html>
@@ -135,7 +157,6 @@ try:
                     Schedule:<br>
                     <input type="text" name="subjsched" id="subjsched"><br><br>
 
-                    <!-- use ts to append the subjid to the url, somehow -->
                     <input type="hidden" name="action" id="action">
                   
                     <input type="submit" value="Insert" onclick="document.getElementById('action').value='insert'">
@@ -164,6 +185,7 @@ try:
         subjdesc = html.escape(str(rows[i][2]))
         subjunits = str(rows[i][3])
         subjsched = html.escape(str(rows[i][4]))
+        enrolledcount = str(rows[i][5])
 
         urlsubjappend = str(rows[i][0])
 
@@ -176,7 +198,7 @@ try:
         print("<td>" + subjdesc + "</td>")
         print("<td>" + subjunits + "</td>")
         print("<td>" + subjsched + "</td>")
-        print("<td>0</td>") # total units here
+        print("<td>" + enrolledcount + "</td>")
         print("</tr>")
 
     print("""
@@ -205,14 +227,15 @@ try:
     </html>
     """)
 
-# prevent blank pages, displays database/runtime errors if there are any
-except Exception as e:
+# displays database/runtime errors if there are any, shows line number of error
+except Exception:
+    tb = traceback.format_exc()
     print("<h2>Error</h2>")
-    print(f"<pre>{e}</pre>")
+    print(f"<pre>{tb}</pre>")
+    print("Something Broke Dumbass")
 
 # ensure database connection is closed
 finally:
     if 'conn' in locals():
         conn.close()
-
 
