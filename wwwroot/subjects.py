@@ -71,21 +71,58 @@ try:
     # show what subject id is currently selected + update table to show # of students
     if selected_subjid:
         heading = f"Students Enrolled in Subject ID: {html.escape(selected_subjid)}"
+
         cursor.execute(
             "SELECT COUNT(*) FROM enroll WHERE subjid = %s",
             (selected_subjid,)
         )
-        studenrolledcount = cursor.fetchone()[0]
+        studenrolledcount = cursor.fetchone()[0] # extract only the int from the tuple
+
+        cursor.execute(
+            "SELECT subjid, subjcode, subjdesc, subjunits, subjsched FROM subjects WHERE subjid=%s",
+            (selected_subjid,)
+        )
+        selectedsubject = cursor.fetchone()
     else:
         heading = "Students Enrolled in Subject ID: (not selected yet)"
         studenrolledcount = 0
+        
+    # fix for window.location.href reloading the site after the input fields are populated
+    selectedsubject = None
+    if selected_subjid:
+        cursor.execute(
+            "SELECT subjid, subjcode, subjdesc, subjunits, subjsched FROM subjects WHERE subjid=%s",
+            (selected_subjid,)
+        )
+        selectedsubject = cursor.fetchone()
+
+    if selectedsubject:
+        subjid_val = str(selectedsubject[0])
+        subjcode_val = html.escape(selectedsubject[1])
+        subjdesc_val = html.escape(selectedsubject[2])
+        subjunits_val = str(selectedsubject[3])
+        subjsched_val = html.escape(selectedsubject[4])
+    else:
+        subjid_val = str(next_subjid)
+        subjcode_val = subjdesc_val = subjunits_val = subjsched_val = ""
+        
+    # get the data to populate the enrolled students table for the selected subject
+    enrolledstudents = []
+    if selected_subjid:
+        cursor.execute(
+            """SELECT s.studid, s.studname, s.studadd, s.studcrs, s.studgender, s.yrlvl
+                FROM enroll e JOIN students s ON e.studid = s.studid
+                WHERE e.subjid=%s""",
+            (selected_subjid,)
+        )
+        enrolledstudents = cursor.fetchall()
 
     print("""
     <html>
     <head>
         <style>
         body {
-            background-color: #000000;
+            background-color: #1f1f1f;
             color: white;
         }
         input {
@@ -96,7 +133,7 @@ try:
             border-collapse:collapse; 
         }
         th, td { 
-            border:1px solid white; padding:5px; 
+            border:2px solid white; padding:5px; 
         }
         </style>
         
@@ -111,9 +148,7 @@ try:
             document.getElementById("subjsched").value = subjsched;
             document.getElementById("changesubjid").innerText = "Students Enrolled in Subject ID: " + subjid;
 
-            // pushState should make the page not reload compared to window.location.href
-            history.pushState({}, "", `subjects.py?subjid=${subjid}`);
-            
+            window.location.href = `subjects.py?subjid=${subjid}`;       
             updateStudentUrl();
         }
             
@@ -147,15 +182,15 @@ try:
                 <!-- submit data back to this script -->
                 <form id="hello" action="subjects.py" method="post">
                     Subject ID:<br>
-                    <input type="text" name="subjid" id="subjid" readonly><br>
+                    <input type="text" name="subjid" id="subjid" value="""+subjid_val+""" readonly><br>
                     Subject Code:<br>
-                    <input type="text" name="subjcode" id="subjcode"><br>
+                    <input type="text" name="subjcode" id="subjcode" value="""+subjcode_val+"""><br>
                     Description:<br>
-                    <input type="text" name="subjdesc" id="subjdesc"><br><br>
+                    <input type="text" name="subjdesc" id="subjdesc" value="""+subjdesc_val+"""><br><br>
                     Units:<br>
-                    <input type="number" name="subjunits" id="subjunits"><br><br>
+                    <input type="number" name="subjunits" id="subjunits" value="""+subjunits_val+"""><br><br>
                     Schedule:<br>
-                    <input type="text" name="subjsched" id="subjsched"><br><br>
+                    <input type="text" name="subjsched" id="subjsched" value="""+subjsched_val+"""><br><br>
 
                     <input type="hidden" name="action" id="action">
                   
@@ -180,24 +215,24 @@ try:
 
     # clicking a row fills the form fields/input boxes
     for i in range(len(rows)):
-        subjid = str(rows[i][0])
-        subjcode = html.escape(str(rows[i][1]))
-        subjdesc = html.escape(str(rows[i][2]))
-        subjunits = str(rows[i][3])
-        subjsched = html.escape(str(rows[i][4]))
+        subjid_val = str(rows[i][0])
+        subjcode_val = html.escape(str(rows[i][1]))
+        subjdesc_val = html.escape(str(rows[i][2]))
+        subjunits_val = str(rows[i][3])
+        subjsched_val = html.escape(str(rows[i][4]))
         enrolledcount = str(rows[i][5])
 
         urlsubjappend = str(rows[i][0])
 
         print(
             "<tr onclick=\"fillForm('{}','{}','{}','{}','{}')\" style=\"cursor:pointer;\">"
-            .format(subjid, subjcode, subjdesc, subjunits, subjsched)
+            .format(subjid_val, subjcode_val, subjdesc_val, subjunits_val, subjsched_val)
         )
-        print("<td>" + subjid + "</td>")
-        print("<td>" + subjcode + "</td>")
-        print("<td>" + subjdesc + "</td>")
-        print("<td>" + subjunits + "</td>")
-        print("<td>" + subjsched + "</td>")
+        print("<td>" + subjid_val + "</td>")
+        print("<td>" + subjcode_val + "</td>")
+        print("<td>" + subjdesc_val + "</td>")
+        print("<td>" + subjunits_val + "</td>")
+        print("<td>" + subjsched_val + "</td>")
         print("<td>" + enrolledcount + "</td>")
         print("</tr>")
 
@@ -215,13 +250,33 @@ try:
                         <th>ID</th>
                         <th>Name</th>
                         <th>Address</th>
-                        <th>Gender</th>
                         <th>Course</th>
+                        <th>Gender</th>
                         <th>Year Level</th>
                     </tr>
+        """)
+        
+    # clicking a subject shows all students currently enrolled in it
+    for student in enrolledstudents:
+        studid_val = str(student[0])
+        studname_val = str(student[1])
+        studaddress_val = html.escape(str(student[2]))
+        studcourse_val = html.escape(str(student[3]))
+        studgender_val = html.escape(str(student[4]))
+        yearlevel_val = str(student[5])
+        print("<tr style=\"cursor:pointer;\">")
+        print("<td>" + studid_val + "</td>")
+        print("<td>" + studname_val + "</td>")
+        print("<td>" + studaddress_val + "</td>")
+        print("<td>" + studcourse_val + "</td>")
+        print("<td>" + studgender_val + "</td>")
+        print("<td>" + yearlevel_val + "</td>")
+        print("</tr>") 
+        
+    print("""
                 </table>
             </td>
-        </tr>
+        </tr>       
     </table>
     </body>
     </html>
@@ -232,7 +287,6 @@ except Exception:
     tb = traceback.format_exc()
     print("<h2>Error</h2>")
     print(f"<pre>{tb}</pre>")
-    print("Something Broke Dumbass")
 
 # ensure database connection is closed
 finally:
