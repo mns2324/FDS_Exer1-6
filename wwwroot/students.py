@@ -19,7 +19,6 @@ studcourse = html.escape(form.getvalue("studcourse", ""))
 studgender = html.escape(form.getvalue("studgender", ""))
 yearlevel = form.getvalue("yearlevel", "")
 
-
 try:
     # connects to the mysql server
     conn = mysql.connector.connect(
@@ -32,7 +31,7 @@ try:
     # allow execution of sql queries
     cursor = conn.cursor()
 
-    # don't use auto increment lol...
+    # get next student id (no auto increment)
     cursor.execute("SELECT COALESCE(MAX(studid), 999) + 1 FROM students")
     next_studid = cursor.fetchone()[0]
 
@@ -59,14 +58,33 @@ try:
         cursor.execute(
             # ignore will silently ignore duplicate enrolls
             "INSERT IGNORE INTO enroll (studid, subjid, evaluation) VALUES (%s, %s, NULL)",
-            (next_studid, selected_subjid)
+            (studid, selected_subjid)
+        )
+        conn.commit()
+        
+    elif action == "dropstudent" and studid and selected_subjid:
+        cursor.execute(
+            "DELETE FROM enroll WHERE studid=%s AND subjid=%s",
+            (studid, selected_subjid)
         )
         conn.commit()
 
-    # read all records from users table
-    # cursor.execute("SELECT name, age, email FROM users")
+    # read all records from students table
     cursor.execute("SELECT studid, studname, studadd, studcrs, studgender, yrlvl FROM students")
     rows = cursor.fetchall()
+    
+    # fetch total units for all students at once
+    cursor.execute(
+        """SELECT st.studid, COALESCE(SUM(s.subjunits),0) AS total_units
+           FROM students st
+           LEFT JOIN enroll e ON st.studid = e.studid
+           LEFT JOIN subjects s ON e.subjid = s.subjid
+           GROUP BY st.studid"""
+    )
+    # student id: total units (e.g. 1000: 24)
+    studentunits = {}
+    for studid_db, total_units in cursor.fetchall():
+        studentunits[str(studid_db)] = total_units
 
     # bandaid fix for window.location.href reloading the site after the input fields are populated
     selectedstudent = None
@@ -85,7 +103,8 @@ try:
         studgender_val = html.escape(selectedstudent[4])
         yearlevel_val = str(selectedstudent[5])
     else:
-        studid_val = studname_val = studaddress_val = studcourse_val = studgender_val = yearlevel_val = ""
+        studid_val = str(next_studid)
+        studname_val = studaddress_val = studcourse_val = studgender_val = yearlevel_val = ""
 
     # get the data to populate the enrolled subjects table for the selected student
     enrolledsubjects = []
@@ -103,7 +122,7 @@ try:
     <head>
         <style>
         body {
-            background-color: #000000;
+            background-color: #1f1f1f;
             color: white;
         }
         input {
@@ -114,7 +133,7 @@ try:
             border-collapse:collapse; 
         }
         th, td { 
-            border:1px solid white; padding:5px; 
+            border:2px solid white; padding:5px; 
         }
         </style>
         
@@ -150,9 +169,32 @@ try:
            const params = new URLSearchParams(window.location.search);
            document.getElementById('subjid').value = params.get('subjid');
            
-           // set the hidden action to enrollstudent then submit
+           // set the hidden action to enrollstudent then execute
            document.getElementById('action').value = 'enrollstudent';
            document.querySelector("form").submit();
+        }
+        
+        function dropStudent() {
+            // set the hidden action to dropstudent then execute
+            document.getElementById('action').value = 'dropstudent';
+            document.querySelector("form").submit();
+        }
+        
+        function selectSubjectToDrop(enrolledsubjid) {
+            const params = new URLSearchParams(window.location.search);
+            const studid = params.get('studid');
+            const enrollbtn = document.getElementById("enrollbtn");
+            const dropbtn = document.getElementById("dropbtn");
+            
+            // shopw the dropbtn ONLY if you select a student then one enrolled subject
+            if (studid && enrolledsubjid) {
+                enrollbtn.style.display = "none";
+                dropbtn.style.display = "inline-block";
+                dropbtn.value = `Drop Student ID: ${studid} from Subject ID: ${enrolledsubjid}`;
+                
+                // store this in the hidden form field for dropSubject()
+                document.getElementById('subjid').value = enrolledsubjid;
+            }
         }
         
         // show the current student id (if it exists) when the page is loaded
@@ -167,6 +209,9 @@ try:
                 btn.style.display = "inline-block";
                 btn.value = `Enroll Student ID: ${studid || '?'} to Subject ID: ${subjid}`;
             }
+            
+            // initialize drop button as hidden
+            document.getElementById("dropbtn").style.display = "none";
         });
       
         </script>
@@ -205,6 +250,7 @@ try:
                     
                     <!-- form.submit will send the data back -->
                     <input type="button" id="enrollbtn" value="" style="display:none;" onclick="enrollStudent()">
+                    <input type="button" id="dropbtn" value="" style="display:none;" onclick="dropStudent()">
                 </form>
             </td>
 
@@ -231,6 +277,8 @@ try:
         studcourse_val = html.escape(str(rows[i][3]))
         studgender_val = html.escape(str(rows[i][4]))
         yearlevel_val = str(rows[i][5])
+        # get the total units for the student from the dict, 0 as default
+        totalunits_val = studentunits.get(studid_val, 0)
 
         print(
             "<tr onclick=\"fillFormStudents('{}','{}','{}','{}','{}','{}')\" style=\"cursor:pointer;\">"
@@ -242,7 +290,7 @@ try:
         print("<td>" + studcourse_val + "</td>")
         print("<td>" + studgender_val + "</td>")
         print("<td>" + yearlevel_val + "</td>")
-        print("<td>0</td>")  # placeholder
+        print("<td>" + str(totalunits_val) + "</td>")
         print("</tr>") # close the table row
 
     print("""
@@ -263,14 +311,15 @@ try:
                         <th>Schedule</th>
                     </tr>                 
         """)
-        
+    
+    # clicking a student shows their enrolled subjects
     for subject in enrolledsubjects:
         subjid_val = str(subject[0])
         subjcode_val = html.escape(str(subject[1]))
         subjdesc_val = html.escape(str(subject[2]))
         subjunits_val = str(subject[3])
         subjsched_val = html.escape(str(subject[4]))
-        print("<tr style=\"cursor:pointer;\">")
+        print(f"<tr onclick=\"selectSubjectToDrop('{subjid_val}')\" style=\"cursor:pointer;\">")
         print("<td>" + subjid_val + "</td>")
         print("<td>" + subjcode_val + "</td>")
         print("<td>" + subjdesc_val + "</td>")
@@ -298,4 +347,3 @@ except Exception:
 finally:
     if 'conn' in locals():
         conn.close()
-
