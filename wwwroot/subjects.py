@@ -1,295 +1,177 @@
-#!/usr/bin/env python3
-
 import cgi
 import mysql.connector
 import html
-import traceback
-
-print("Content-Type: text/html\n")
-
+print("Content-Type: text/html")
+print("")
 form = cgi.FieldStorage()
 action = form.getvalue("action", "")
 
-studid = form.getvalue("studid", "")
-subjid, selected_subjid = form.getvalue("subjid", ""), form.getvalue("subjid", "")
+subjid = form.getfirst("subjid", "")
+subjcode = form.getvalue("subjcode", "")
+subjdesc = form.getvalue("subjdesc", "")
+subjunit = form.getvalue("subjunit", "")
+subjsched = form.getvalue("subjsched", "")
+std_url = "students.py"
 
-subjcode = html.escape(form.getvalue("subjcode", ""))
-subjdesc = html.escape(form.getvalue("subjdesc", ""))
-subjunits = html.escape(form.getvalue("subjunits", ""))
-subjsched = html.escape(form.getvalue("subjsched", ""))
 
 try:
-    # connects to the mysql server
     conn = mysql.connector.connect(
         host="localhost",
         user="root",
         password="root",
-        database="enrollmentsystem"
+        database="student_information_system"
     )
-
-    # allow execution of sql queries
     cursor = conn.cursor()
+    cursor.execute("select coalesce(max(subjid),1999) +1 from subjects")
+    nextSubjID = cursor.fetchone()[0]
 
-    # don't use auto increment lol...
-    cursor.execute("SELECT COALESCE(MAX(subjid), 1999) + 1 FROM subjects")
-    next_subjid = cursor.fetchone()[0]
-
-    # insert, update, delete to sql
-    if action == "insert" and subjcode and subjdesc and subjunits and subjsched:
+    if action == "insert" and subjcode and subjdesc and subjunit and subjsched:
         cursor.execute(
-            "INSERT INTO subjects (subjid, subjcode, subjdesc, subjunits, subjsched) VALUES (%s, %s, %s, %s, %s)",
-            (next_subjid, subjcode, subjdesc, subjunits, subjsched)
+            "INSERT INTO subjects (subjid,subjcode, subjdesc, subjunits, subjsched) VALUES (%s, %s, %s, %s, %s)",
+            (nextSubjID, subjcode, subjdesc, subjunit, subjsched)
         )
         conn.commit()
-
-    elif action == "update" and subjid and subjcode and subjdesc and subjunits and subjsched:
+        subjid = ""
+    elif action == "update" and subjid and subjcode and subjdesc and subjunit and subjsched:
         cursor.execute(
             "UPDATE subjects SET subjcode=%s, subjdesc=%s, subjunits=%s, subjsched=%s WHERE subjid=%s",
-            (subjcode, subjdesc, subjunits, subjsched, subjid)
+            (subjcode, subjdesc, subjunit, subjsched, subjid)
         )
         conn.commit()
-
+        subjid = ""
     elif action == "delete" and subjid:
-        cursor.execute( "DELETE FROM subjects WHERE subjid=%s", (subjid,) )
+        cursor.execute(
+            "DELETE FROM subjects WHERE subjid=%s",
+            (subjid,)
+        )
         conn.commit()
-
-    # read all records from subjects, even those with no enrollees
-    cursor.execute("""
-        SELECT 
-            s.subjid,
-            s.subjcode,
-            s.subjdesc,
-            s.subjunits,
-            s.subjsched,
-            COUNT(e.studid) AS enrolledcount
-        FROM subjects s
-        LEFT JOIN enroll e ON e.subjid = s.subjid
-        GROUP BY s.subjid
-    """)
-    rows = cursor.fetchall()
+        cursor.execute(
+            "DELETE FROM enroll WHERE subjid=%s",
+            (subjid,)
+        )
+        subjid = ""
     
-    # show what subject id is currently selected + update table to show # of students
-    if selected_subjid:
-        heading = f"Students Enrolled in Subject ID: {html.escape(selected_subjid)}"
+    
 
+    if subjid and action == "":
         cursor.execute(
-            "SELECT COUNT(*) FROM enroll WHERE subjid = %s",
-            (selected_subjid,)
+            "SELECT * FROM subjects WHERE subjid=%s",
+            (subjid,)
         )
-        studenrolledcount = cursor.fetchone()[0] # extract only the int from the tuple
+        subject = cursor.fetchone()
+        if subject:
+            subjid, subjcode, subjdesc, subjunit, subjsched = subject
+            std_url += f"?subjid={subjid}"
+            nextSubjID = subjid
 
-        cursor.execute(
-            "SELECT subjid, subjcode, subjdesc, subjunits, subjsched FROM subjects WHERE subjid=%s",
-            (selected_subjid,)
-        )
-        selectedsubject = cursor.fetchone()
-    else:
-        heading = "Students Enrolled in Subject ID: (not selected yet)"
-        studenrolledcount = 0
-        
-    # fix for window.location.href reloading the site after the input fields are populated
-    selectedsubject = None
-    if selected_subjid:
-        cursor.execute(
-            "SELECT subjid, subjcode, subjdesc, subjunits, subjsched FROM subjects WHERE subjid=%s",
-            (selected_subjid,)
-        )
-        selectedsubject = cursor.fetchone()
+    cursor.execute("select * from subjects")
+    subjects = cursor.fetchall()
+    cursor.execute("Select * from enroll")
+    enrollTbl = cursor.fetchall()
 
-    if selectedsubject:
-        subjid_val = str(selectedsubject[0])
-        subjcode_val = html.escape(selectedsubject[1])
-        subjdesc_val = html.escape(selectedsubject[2])
-        subjunits_val = str(selectedsubject[3])
-        subjsched_val = html.escape(selectedsubject[4])
-    else:
-        subjid_val = str(next_subjid)
-        subjcode_val = subjdesc_val = subjunits_val = subjsched_val = ""
-        
-    # get the data to populate the enrolled students table for the selected subject
-    enrolledstudents = []
-    if selected_subjid:
-        cursor.execute(
-            """SELECT s.studid, s.studname, s.studadd, s.studcrs, s.studgender, s.yrlvl
-                FROM enroll e JOIN students s ON e.studid = s.studid
-                WHERE e.subjid=%s""",
-            (selected_subjid,)
-        )
-        enrolledstudents = cursor.fetchall()
-
-    print("""
+    
+    print(f"""
     <html>
     <head>
-        <style>
-        body {
-            background-color: #1f1f1f;
-            color: white;
-        }
-        input {
-            background-color: #000000;
-            color: white;
-        }
-        table { 
-            border-collapse:collapse; 
-        }
-        th, td { 
-            border:2px solid white; padding:5px; 
-        }
-        </style>
-        
-        <script>  
-        
-        // copies data into the input fields to allow updating
-        function fillForm(subjid, subjcode, subjdesc, subjunits, subjsched) {
-            document.getElementById("subjid").value = subjid;
-            document.getElementById("subjcode").value = subjcode;
-            document.getElementById("subjdesc").value = subjdesc;
-            document.getElementById("subjunits").value = subjunits;
-            document.getElementById("subjsched").value = subjsched;
-            document.getElementById("changesubjid").innerText = "Students Enrolled in Subject ID: " + subjid;
-
-            window.location.href = `subjects.py?subjid=${subjid}`;       
-            updateStudentUrl();
-        }
-            
-        function updateStudentUrl() {
-            // grab the subjects url, get the current subjid, then append it to the students href
-            const params = new URLSearchParams(window.location.search);
-            const subjid = params.get("subjid");
-            const link = document.getElementById("studentformurl");
-            
-            if (subjid) {
-                link.href = `http://localhost/students.py?subjid=${subjid}`;
-            }
-        }
-        
-        // run this function when the subjects form is loaded
-        window.addEventListener("load", updateStudentUrl);
-        
-        </script>        
+    <title>Subject Management</title>
+    <link rel ="stylesheet" href="styles.css">
     </head>
-
     <body>
-    <table width="100%" cellpadding="10">
+        <table width="100%" cellpadding="10">
         <tr>
-            <td colspan="2">
-                <a id="studentformurl" href="http://localhost/students.py">Students</a>
-            </td>
-        </tr>
-        <tr>
-            <td width="30%" valign="top">
-                <h3>Subjects Form</h3>
-                <!-- submit data back to this script -->
-                <form id="hello" action="subjects.py" method="post">
-                    Subject ID:<br>
-                    <input type="text" name="subjid" id="subjid" value="""+subjid_val+""" readonly><br>
-                    Subject Code:<br>
-                    <input type="text" name="subjcode" id="subjcode" value="""+subjcode_val+"""><br>
-                    Description:<br>
-                    <input type="text" name="subjdesc" id="subjdesc" value="""+subjdesc_val+"""><br><br>
-                    Units:<br>
-                    <input type="number" name="subjunits" id="subjunits" value="""+subjunits_val+"""><br><br>
-                    Schedule:<br>
-                    <input type="text" name="subjsched" id="subjsched" value="""+subjsched_val+"""><br><br>
-
-                    <input type="hidden" name="action" id="action">
-                  
-                    <input type="submit" value="Insert" onclick="document.getElementById('action').value='insert'">
-                    <input type="submit" value="Update" onclick="document.getElementById('action').value='update'">
-                    <input type="submit" value="Delete" onclick="document.getElementById('action').value='delete'">
-                </form>
-            </td>
-
-            <td width="70%" valign="top">
-                <h3>Subjects Table</h3>
-                <table border="1" cellpadding="5" cellspacing="0" width="100%">
-                    <tr>
-                        <th>ID</th>
-                        <th>Code</th>
-                        <th>Description</th>
-                        <th>Units</th>
-                        <th>Schedule</th>
-                        <th># of Students</th>
-                    </tr>
-    """)
-
-    # clicking a row fills the form fields/input boxes
-    for i in range(len(rows)):
-        subjid_val = str(rows[i][0])
-        subjcode_val = html.escape(str(rows[i][1]))
-        subjdesc_val = html.escape(str(rows[i][2]))
-        subjunits_val = str(rows[i][3])
-        subjsched_val = html.escape(str(rows[i][4]))
-        enrolledcount = str(rows[i][5])
-
-        urlsubjappend = str(rows[i][0])
-
-        print(
-            "<tr onclick=\"fillForm('{}','{}','{}','{}','{}')\" style=\"cursor:pointer;\">"
-            .format(subjid_val, subjcode_val, subjdesc_val, subjunits_val, subjsched_val)
-        )
-        print("<td>" + subjid_val + "</td>")
-        print("<td>" + subjcode_val + "</td>")
-        print("<td>" + subjdesc_val + "</td>")
-        print("<td>" + subjunits_val + "</td>")
-        print("<td>" + subjsched_val + "</td>")
-        print("<td>" + enrolledcount + "</td>")
-        print("</tr>")
-
-    print("""
-                </table>
-            </td>
-        </tr>
+        <td width="30%" valign="top">
+        <h1>Subject Management</h1>
+        <a href="{std_url}"><h2>Students</h2></a> 
         
-        <tr>
-            <td width="30%"></td> <!-- empty cell to align with form -->
-            <td width="70%" valign="top">
-                <h3 id="changesubjid">""" + heading + """</h3>
-                <table border="1" cellpadding="5" cellspacing="0" width="100%">
-                    <tr>
-                        <th>ID</th>
-                        <th>Name</th>
-                        <th>Address</th>
-                        <th>Course</th>
-                        <th>Gender</th>
-                        <th>Year Level</th>
-                    </tr>
+        <form method="post" action="subjects.py">
+            <input type="hidden" name="action" id="action" value="">
+            Subject ID: <input type="text" name="subjid" value="{nextSubjID}" readonly><br>
+            Subject Code:<input type="text" name="subjcode" value="{subjcode}" ><br>
+            Subject Description: <input type="text" name="subjdesc" value="{subjdesc}" ><br>
+            Subject Units: <input type="number" name="subjunit" value="{subjunit}" ><br>
+            Subject Schedule: <input type="text" name="subjsched" value="{subjsched}" ><br>
+            
+             <input type="submit" value="Add Subject" onclick="document.getElementById('action').value='insert'">
+            <input type="submit" value="Update Subject" onclick="document.getElementById('action').value='update'">
+            <input type="submit" value="Delete Subject" onclick="document.getElementById('action').value='delete'">
+        </form>
+        </td>
+        <td width="70%" valign="top">
+        <h1>Subjects List</h1>
+        <table border="1" cellpadding="5" cellspacing="0" width="75%">
+            <tr>
+                <th>Subject ID</th>
+                <th>Code</th>
+                <th>Description</th>
+                <th>Units</th>
+                <th>Schedule</th>
+                <th>Number Of Students</th>
+            </tr>
+            
+    """)
+    for subject in subjects:
+        subjid, subjcode, subjdesc, subjunit, subjsched = subject
+        cursor.execute(
+            "SELECT COUNT(*) FROM enroll WHERE subjid=%s", (subjid,))
+        count = cursor.fetchone()[0]
+        print(f"""
+            <tr onclick="window.location='subjects.py?subjid={subjid}'" style="cursor:pointer;">
+                <td>{subjid}</td>
+                <td>{subjcode}</td>
+                <td>{subjdesc}</td>
+                <td>{subjunit}</td>
+                <td>{subjsched}</td>
+                <td>{count}</td>
+            </tr>
         """)
+    print(f"""
+        </table>
+        <h1> Students Enrolled in Subjects</h1>
+        <table border="1" cellpadding="5" cellspacing="0" width="75%">
+          <tr>
+          <th>Student Id</th>
+            <th>Name</th>
+            <th>Address</th>
+            <th>Course</th>
+            <th>Gender</th>
+            <th>Year Level</th>
+          </tr>
+          """)
+    for enroll in enrollTbl:
+        enroll_id, enroll_studid, enroll_subjid, enroll_eval = enroll
         
-    # clicking a subject shows all students currently enrolled in it
-    for student in enrolledstudents:
-        studid_val = str(student[0])
-        studname_val = str(student[1])
-        studaddress_val = html.escape(str(student[2]))
-        studcourse_val = html.escape(str(student[3]))
-        studgender_val = html.escape(str(student[4]))
-        yearlevel_val = str(student[5])
-        print("<tr style=\"cursor:pointer;\">")
-        print("<td>" + studid_val + "</td>")
-        print("<td>" + studname_val + "</td>")
-        print("<td>" + studaddress_val + "</td>")
-        print("<td>" + studcourse_val + "</td>")
-        print("<td>" + studgender_val + "</td>")
-        print("<td>" + yearlevel_val + "</td>")
-        print("</tr>") 
-        
+        if subjid != "":
+
+            if enroll_subjid == int(subjid):
+                
+                cursor.execute(
+                    "SELECT * FROM students WHERE studid=%s",
+                    (enroll_studid,)
+                )
+                student = cursor.fetchone()
+                if student:
+                    
+                    stdid, name, address, course, gender, year_level = student
+                print(f"""
+                <tr>
+                <td>{stdid}</td>
+                <td>{html.escape(name)}</td>
+                <td>{html.escape(address)}</td>
+                <td>{html.escape(course)}</td>
+                <td>{html.escape(gender)}</td>
+                <td>{html.escape(year_level)}</td>
+                </tr>
+            """)
     print("""
-                </table>
-            </td>
-        </tr>       
-    </table>
-    </body>
-    </html>
+          </table>
+        </td>
+        </tr>
+        </table>
+    </body></html>
     """)
-
-# displays database/runtime errors if there are any, shows line number of error
-except Exception:
-    tb = traceback.format_exc()
-    print("<h2>Error</h2>")
-    print(f"<pre>{tb}</pre>")
-
-# ensure database connection is closed
+except Exception as e:
+    print("<h1>Error</h1>")
+    print(f"<pre>{e}</pre>")
 finally:
     if 'conn' in locals():
         conn.close()
-
