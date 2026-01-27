@@ -172,9 +172,9 @@ try:
     <body>
     <table width="100%" cellpadding="10">
         <tr>
-            <td colspan="2">
+            <td colspan="2" style="padding: 10px 5px;">
                 <a id="studentformurl" href="students.py">Students</a>
-                <span style="text-decoration:underline; padding: 10px 5px;">Subjects</span>
+                <span>Subjects</span>
                 <a href="teachers.py">Teachers</a>
             </td>
         </tr>
