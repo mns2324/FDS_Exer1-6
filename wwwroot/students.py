@@ -159,8 +159,7 @@ try:
 
             const btn = document.getElementById("enrollbtn");
 
-            // make enrollbtn visible if subject is selected. if no student selected, show ?
-            // if already enrolled, hide
+            // make enrollbtn visible if subject is selected. if no student selected, show ?. if already enrolled, hide.
             if (subjid) {
                 if (enrolledsubjects.includes(subjid)) {
                     btn.style.display = "none";
@@ -213,8 +212,7 @@ try:
             
             const btn = document.getElementById("enrollbtn");
 
-            // make enrollbtn visible if subject is selected. if no student selected, show ?
-            // if already enrolled, hide
+            // make enrollbtn visible if subject is selected. if no student selected, show ?. if already enrolled, hide.
             if (subjid && studid) {
                 if (enrolledsubjects.includes(subjid)) {
                     btn.style.display = "none";
@@ -234,8 +232,8 @@ try:
     <body>
     <table width="100%" cellpadding="10">
         <tr>
-            <td colspan="2">
-                <span style="text-decoration:underline; padding: 10px 5px;">Students</span>
+            <td colspan="2" style="padding: 10px 5px;">
+                <span>Students</span>
                 <a href="subjects.py">Subjects</a>
                 <a href="teachers.py">Teachers</a>
             </td>
