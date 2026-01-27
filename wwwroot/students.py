@@ -235,7 +235,9 @@ try:
     <table width="100%" cellpadding="10">
         <tr>
             <td colspan="2">
+                <span style="text-decoration:underline; padding: 10px 5px;">Students</span>
                 <a href="subjects.py">Subjects</a>
+                <a href="teachers.py">Teachers</a>
             </td>
         </tr>
         <tr>
