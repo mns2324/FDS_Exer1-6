@@ -174,6 +174,8 @@ try:
         <tr>
             <td colspan="2">
                 <a id="studentformurl" href="students.py">Students</a>
+                <span style="text-decoration:underline; padding: 10px 5px;">Subjects</span>
+                <a href="teachers.py">Teachers</a>
             </td>
         </tr>
         <tr>
