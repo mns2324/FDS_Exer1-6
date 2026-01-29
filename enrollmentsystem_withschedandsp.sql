@@ -181,6 +181,107 @@ LOCK TABLES `teachers` WRITE;
 INSERT INTO `teachers` VALUES (3000,'a','a','a','a','a'),(3001,'x','x','x','x','x'),(3002,'a','a','a','a','a');
 /*!40000 ALTER TABLE `teachers` ENABLE KEYS */;
 UNLOCK TABLES;
+
+--
+-- Dumping routines for database 'enrollmentsystem'
+--
+/*!50003 DROP PROCEDURE IF EXISTS `checkconflict` */;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = cp932 */ ;
+/*!50003 SET character_set_results = cp932 */ ;
+/*!50003 SET collation_connection  = cp932_japanese_ci */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION' */ ;
+DELIMITER ;;
+CREATE DEFINER=`root`@`localhost` PROCEDURE `checkconflict`(in param_studid int, in param_subjid int, out result varchar(25))
+BEGIN
+    DECLARE i INT DEFAULT 1;
+    DECLARE j INT;
+    DECLARE n INT;
+    DECLARE a TEXT;
+    DECLARE b TEXT;
+
+    DECLARE newdays VARCHAR(5);
+    DECLARE newstart VARCHAR(5);
+    DECLARE newend VARCHAR(5);
+
+    DECLARE olddays VARCHAR(5);
+    DECLARE oldstart VARCHAR(5);
+    DECLARE oldend VARCHAR(5);
+
+    DROP TEMPORARY TABLE IF EXISTS oldsched;
+    CREATE TABLE oldsched (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        osched text
+    );
+
+    
+    INSERT INTO oldsched(osched) 
+    SELECT subjsched FROM subjects 
+    INNER JOIN enroll ON subjects.subjid = enroll.subjid
+    WHERE enroll.studid = param_studid;
+
+    
+    
+    SELECT 
+        LEFT(subjsched,3), 
+        SUBSTRING(subjsched,5,5), 
+        SUBSTRING(subjsched,11,5) 
+    INTO newdays, newstart, newend
+    FROM subjects WHERE subjid = param_subjid;
+
+    SELECT COUNT(*) INTO n FROM oldsched;
+
+    SET result = '';
+
+    WHILE i <= n DO
+        SET j = 1;
+
+        WHILE j < n DO
+            SELECT osched INTO a FROM oldsched WHERE id = j;
+            SELECT osched INTO b FROM oldsched WHERE id = j + 1;
+
+            IF a > b THEN
+                UPDATE oldsched SET osched = b WHERE id = j;
+                UPDATE oldsched SET osched = a WHERE id = j + 1;
+            END IF;
+
+            SET j = j + 1;
+        END WHILE;
+
+        
+        
+        SELECT 
+            LEFT(osched,3),
+            SUBSTRING(osched,5,5),
+            SUBSTRING(osched,11,5)
+        INTO olddays, oldstart, oldend
+        FROM oldsched
+        WHERE id = i;
+
+        SET oldstart = STR_TO_DATE(oldstart, '%H:%i');
+        SET oldend   = STR_TO_DATE(oldend, '%H:%i');
+        SET newstart = STR_TO_DATE(newstart, '%H:%i');
+        SET newend   = STR_TO_DATE(newend, '%H:%i');
+
+        
+        
+        IF(olddays = newdays) THEN
+            IF(oldstart < newend AND oldend > newstart) THEN
+                SET result = CONCAT('Conflict with ', olddays, ' ', oldstart, '-', oldend);
+            END IF;
+        END IF;
+
+        SET i = i + 1;
+    END WHILE;
+END ;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -191,4 +292,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-01-29 22:24:35
+-- Dump completed on 2026-01-29 22:30:06
