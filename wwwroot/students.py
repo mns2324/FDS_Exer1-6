@@ -362,3 +362,42 @@ except Exception:
 finally:
     if 'conn' in locals():
         conn.close()
+
+# CREATE PROCEDURE checkconflict(in studid int, in subjid int, out result varchar(25))
+
+# DECLARE newdays INT DEFAULT 1;
+# DECLARE j INT;
+# DECLARE n INT;
+# DECLARE a INT;
+# DECLARE b INT;
+
+# DROP TEMPORARY TABLE IF EXISTS oldsched;
+# CREATE TABLE oldsched (
+# 	id INT AUTO_INCREMENT PRIMARY KEY,
+# 	osched text
+# );
+
+
+# // inner join to only show subjects with enrolled students, insert schedules of studid var into osched row of oldsched table
+# INSERT INTO oldsched(osched) SELECT subjsched FROM subjects INNER JOIN enroll ON subjects.subjid = enroll.subjid; WHERE studid = studid;
+
+# // break down the subjsched string using left() and substring() and assign them variables
+# select left(subjsched,3) into newdays, substring(subjsched,5,5) into newstarttime, substring(subjsched,11,5) into newendtime from subjects where subjid = subjid;
+
+# SELECT COUNT(*) INTO n FROM oldsched;
+
+# WHILE i < n DO
+# 	SET j = 1;
+# select left(osched,3) into olddays, substring(osched,5,5) into oldstarttime, substring(osched,11,5) into oldendtime from subjects where subjid = subjid;
+
+
+# // go to next sched if no conflict, otherwise breakdown the string and check the start/endtimes
+# IF() THEN
+# 		// do the code yourself
+# END IF;
+
+
+# 	SET i = i + 1;
+# END WHILE;
+
+
