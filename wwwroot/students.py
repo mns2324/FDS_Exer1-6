@@ -12,6 +12,7 @@ action = form.getvalue("action", "")
 
 studid = form.getvalue("studid", "")
 selected_subjid = form.getvalue("subjid")
+conflict_msg = ""
 
 studname = html.escape(form.getvalue("studname", ""))
 studaddress= html.escape(form.getvalue("studaddress", ""))
@@ -55,11 +56,15 @@ try:
         conn.commit()
         
     elif action == "enrollstudent" and studid and selected_subjid:  
-        cursor.execute(
-            "INSERT INTO enroll (studid, subjid, evaluation) VALUES (%s, %s, NULL)",
-            (studid, selected_subjid)
-        )
-        conn.commit()
+        result = cursor.callproc('checkconflict', [studid, selected_subjid, None])
+        conflict_msg = result[2]      
+        
+        if conflict_msg == "No conflict":
+            cursor.execute(
+                "INSERT INTO enroll (studid, subjid, evaluation) VALUES (%s, %s, NULL)",
+                (studid, selected_subjid)
+            )
+            conn.commit()
         
     elif action == "dropstudent" and studid and selected_subjid:
         cursor.execute(
@@ -118,6 +123,8 @@ try:
 
     # for hiding enroll button for students already enrolled in a subject
     enrolled_subj_ids = [str(s[0]) for s in enrolledsubjects]
+    # for showing the conflict message span
+    conflict_msg_js = html.escape(conflict_msg or "")
 
     print("""
     <html>
@@ -141,6 +148,18 @@ try:
         
         <script>
         const enrolledsubjects = """ + str(enrolled_subj_ids) + """;
+        const conflictMessage = """ + f'"{conflict_msg_js}"' + """;
+
+        // show conflict message dynamically
+        function showConflictMessage(msg) {
+            const span = document.getElementById("conflictmsg");
+            span.textContent = msg;
+            if(msg && msg !== "No conflict") {
+                span.style.display = "inline";
+            } else {
+                span.style.display = "none";
+            }
+        }
         
         // copies data into the input fields to allow updating
         function fillFormStudents(studid, studname, studaddress, studcourse, studgender, yearlevel) {
@@ -224,8 +243,8 @@ try:
                 btn.style.display = "none";
             }
             
-            // initialize drop button as hidden
             document.getElementById("dropbtn").style.display = "none";
+            showConflictMessage(conflictMessage);
         });
         </script>
     </head>
@@ -260,6 +279,8 @@ try:
                     <input type="submit" value="Insert" onclick="document.getElementById('action').value='insert'">
                     <input type="submit" value="Update" onclick="document.getElementById('action').value='update'">
                     <input type="submit" value="Delete" onclick="document.getElementById('action').value='delete'">
+                    <span id="conflictmsg" style="color:red;">{html.escape(conflict_msg)}</span>
+                    
                     <input type="hidden" name="action" id="action" value="">
                     <input type="hidden" name="subjid" id="subjid">
                     
@@ -362,6 +383,5 @@ except Exception:
 finally:
     if 'conn' in locals():
         conn.close()
-
 
 
