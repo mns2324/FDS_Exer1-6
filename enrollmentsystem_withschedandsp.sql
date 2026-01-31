@@ -195,7 +195,7 @@ UNLOCK TABLES;
 /*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
 /*!50003 SET sql_mode              = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION' */ ;
 DELIMITER ;;
-CREATE DEFINER=`root`@`localhost` PROCEDURE `checkconflict`(in param_studid int, in param_subjid int, out result varchar(25))
+CREATE DEFINER=`root`@`localhost` PROCEDURE `checkconflict`(in param_studid int, in param_subjid int, out result varchar(50))
 BEGIN
     DECLARE i INT DEFAULT 1;
     DECLARE j INT;
@@ -212,19 +212,16 @@ BEGIN
     DECLARE oldend VARCHAR(5);
 
     DROP TEMPORARY TABLE IF EXISTS oldsched;
-    CREATE TABLE oldsched (
+    CREATE TEMPORARY TABLE oldsched (
         id INT AUTO_INCREMENT PRIMARY KEY,
         osched text
     );
 
-    
     INSERT INTO oldsched(osched) 
     SELECT subjsched FROM subjects 
     INNER JOIN enroll ON subjects.subjid = enroll.subjid
     WHERE enroll.studid = param_studid;
 
-    
-    
     SELECT 
         LEFT(subjsched,3), 
         SUBSTRING(subjsched,5,5), 
@@ -232,9 +229,11 @@ BEGIN
     INTO newdays, newstart, newend
     FROM subjects WHERE subjid = param_subjid;
 
+    SELECT newdays, newstart,newend; --debug
+
     SELECT COUNT(*) INTO n FROM oldsched;
 
-    SET result = '';
+    SET result = 'No conflict';
 
     WHILE i <= n DO
         SET j = 1;
@@ -251,30 +250,30 @@ BEGIN
             SET j = j + 1;
         END WHILE;
 
-        
-        
-        SELECT 
-            LEFT(osched,3),
-            SUBSTRING(osched,5,5),
-            SUBSTRING(osched,11,5)
-        INTO olddays, oldstart, oldend
-        FROM oldsched
-        WHERE id = i;
-
-        SET oldstart = STR_TO_DATE(oldstart, '%H:%i');
-        SET oldend   = STR_TO_DATE(oldend, '%H:%i');
-        SET newstart = STR_TO_DATE(newstart, '%H:%i');
-        SET newend   = STR_TO_DATE(newend, '%H:%i');
-
-        
-        
-        IF(olddays = newdays) THEN
-            IF(oldstart < newend AND oldend > newstart) THEN
-                SET result = CONCAT('Conflict with ', olddays, ' ', oldstart, '-', oldend);
-            END IF;
-        END IF;
-
         SET i = i + 1;
+    END WHILE;
+
+    SET i = 1;
+    conflict_loop: WHILE i <=n DO 
+      SELECT 
+        -- MWF 09:00-11:00
+        LEFT(osched,3),
+        SUBSTRING(osched,5,5),
+        SUBSTRING(osched,11,5)
+      INTO olddays, oldstart, oldend
+      FROM oldsched
+      WHERE id = i;       
+
+      SELECT olddays,oldstart,oldend; --debug
+  
+      IF(olddays = newdays) THEN
+        IF(oldstart < newend AND oldend > newstart) THEN
+          SET result = CONCAT('Conflict with ', olddays, ' ', oldstart, '-', oldend);
+          LEAVE conflict_loop; -- exit loop on first conflict spotted
+        END IF;
+      END IF;
+
+      SET i = i + 1;
     END WHILE;
 END ;;
 DELIMITER ;
