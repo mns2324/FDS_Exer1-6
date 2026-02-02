@@ -78,11 +78,11 @@ try:
         )
         studenrolledcount = cursor.fetchone()[0] # extract only the int from the tuple
 
-        cursor.execute(
-            "SELECT subjid, subjcode, subjdesc, subjunits, subjsched FROM subjects WHERE subjid=%s",
-            (selected_subjid,)
-        )
-        selectedsubject = cursor.fetchone()
+        # cursor.execute(
+        #     "SELECT subjid, subjcode, subjdesc, subjunits, subjsched FROM subjects WHERE subjid=%s",
+        #     (selected_subjid,)
+        # )
+        # selectedsubject = cursor.fetchone()
     else:
         heading = "Students Enrolled in Subject ID: (not selected yet)"
         studenrolledcount = 0
@@ -132,67 +132,104 @@ try:
         table { 
             border-collapse:collapse; 
         }
-        th, td { 
+        th, td, .header { 
             border:2px solid white; padding:5px; 
+        }
+        .header {
+            display: flex;
+            padding: 10px;
+            text-align: left;
+            background: #0a68f5;
+            color: white;
+            font-size: 18px;
+        }
+        .header img {
+            height: 100px;
+            width: 100px;
+        }
+        .header-text {
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+        }
+        .header-text h1 {
+            margin: 0;
+        }
+        .header-text span {
+            font-size: 16px;
+        }
+        select {
+            background-color: #1f1f1f;
+            color: white;
         }
         </style>
         
         <script>  
         
         // copies data into the input fields to allow updating
-        function fillForm(subjid, subjcode, subjdesc, subjunits, subjsched) {
+        function fillForm(subjid) {
             document.getElementById("subjid").value = subjid;
-            document.getElementById("subjcode").value = subjcode;
-            document.getElementById("subjdesc").value = subjdesc;
-            document.getElementById("subjunits").value = subjunits;
-            document.getElementById("subjsched").value = subjsched;
             document.getElementById("changesubjid").innerText = "Students Enrolled in Subject ID: " + subjid;
 
             window.location.href = `subjects.py?subjid=${subjid}`;       
-            updateStudentUrl();
+            updateUrl();
         }
             
-        function updateStudentUrl() {
+        function updateUrl() {
             // grab the subjects url, get the current subjid, then append it to the students href
             const params = new URLSearchParams(window.location.search);
             const subjid = params.get("subjid");
-            const link = document.getElementById("studentformurl");
+            const studentlink = document.getElementById("studentformurl");
+            const teacherlink = document.getElementById("teacherformurl");
             
             if (subjid) {
-                link.href = `students.py?subjid=${subjid}`;
+                studentlink.href = `students.py?subjid=${subjid}`;
+                teacherlink.href = `teachers.py?subjid=${subjid}`;
             }
         }
         
         // run this function when the subjects form is loaded
-        window.addEventListener("load", updateStudentUrl);
+        window.addEventListener("load", updateUrl);
         
         </script>        
     </head>
 
     <body>
     <table width="100%" cellpadding="10">
+        <div class="header">
+            <img src="catgulp.jpg">
+            <div class="header-text">
+                <h1>STUDENT INFORMATION SYSTEM</h1>
+                <span>UNIVERSITY NAME</span>
+            </div>
+        </div>
         <tr>
             <td colspan="2" style="padding: 10px 5px;">
                 <a id="studentformurl" href="students.py">Students</a>
                 <span>Subjects</span>
-                <a href="teachers.py">Teachers</a>
+                <a id="teacherformurl" href="teachers.py">Teachers</a>
+                <select name="createdbcombo" id="createdbcombo">
+                    <option value="createdb">Create DB</option>
+                </select>
             </td>
         </tr>
         <tr>
             <td width="30%" valign="top">
                 <h3>Subjects Form</h3>
                 <!-- submit data back to this script -->
-                <form id="hello" action="subjects.py" method="post">
+                <form action="subjects.py" method="post">
                     Subject ID:<br>
                     <input type="text" name="subjid" id="subjid" value="""+subjid_val+""" readonly><br>
                     Subject Code:<br>
                     <input type="text" name="subjcode" id="subjcode" value="""+subjcode_val+"""><br>
                     Description:<br>
-                    <input type="text" name="subjdesc" id="subjdesc" value="""+subjdesc_val+"""><br><br>
+                    <!-- add literal quotes here to preserve values with spaces -->
+                    <input type="text" name="subjdesc" id="subjdesc" value=\""""+subjdesc_val+"""\"><br><br>
                     Units:<br>
                     <input type="number" name="subjunits" id="subjunits" value="""+subjunits_val+"""><br><br>
                     Schedule:<br>
-                    <input type="text" name="subjsched" id="subjsched" value="""+subjsched_val+"""><br><br>
+                    <!-- add literal quotes here to preserve values with spaces -->
+                    <input type="text" name="subjsched" id="subjsched" value=\""""+subjsched_val+"""\"><br><br>
 
                     <input type="hidden" name="action" id="action">
                   
@@ -203,7 +240,7 @@ try:
             </td>
 
             <td width="70%" valign="top">
-                <h3>Subjects Table</h3>
+                <h3>Subjects Table for: """+conn.database+"""</h3>
                 <table border="1" cellpadding="5" cellspacing="0" width="100%">
                     <tr>
                         <th>ID</th>
@@ -227,8 +264,8 @@ try:
         urlsubjappend = str(rows[i][0])
 
         print(
-            "<tr onclick=\"fillForm('{}','{}','{}','{}','{}')\" style=\"cursor:pointer;\">"
-            .format(subjid_val, subjcode_val, subjdesc_val, subjunits_val, subjsched_val)
+            "<tr onclick=\"fillForm('{}')\" style=\"cursor:pointer;\">"
+            .format(subjid_val)
         )
         print("<td>" + subjid_val + "</td>")
         print("<td>" + subjcode_val + "</td>")
