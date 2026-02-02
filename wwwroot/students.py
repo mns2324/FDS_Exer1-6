@@ -56,8 +56,9 @@ try:
         conn.commit()
         
     elif action == "enrollstudent" and studid and selected_subjid:  
-        result = cursor.callproc('checkconflict', [studid, selected_subjid, None])
-        conflict_msg = result[2]      
+        # check for schedule conflict
+        result = cursor.callproc('checkconflict', [studid, selected_subjid, 0, None])
+        conflict_msg = result[3]      
         
         if conflict_msg == "No conflict":
             cursor.execute(
@@ -85,7 +86,7 @@ try:
            LEFT JOIN subjects s ON e.subjid = s.subjid
            GROUP BY st.studid"""
     )
-    # student id: total units (e.g. 1000: 24)
+    # assign total units value to the studid key (e.g. 1000: 24)
     studentunits = {}
     for studid_db, total_units in cursor.fetchall():
         studentunits[str(studid_db)] = total_units
@@ -124,8 +125,14 @@ try:
     # for hiding enroll button for students already enrolled in a subject
     enrolled_subj_ids = [str(s[0]) for s in enrolledsubjects]
     # for showing the conflict message span
-    conflict_msg_js = html.escape(conflict_msg or "")
-
+    conflict_msg_js = ""
+    
+    # page load check - check conflict to control message and button visibility
+    if studid and selected_subjid and action != "enrollstudent":
+        result = cursor.callproc('checkconflict', [studid, selected_subjid, 0, None])
+        conflict_msg = result[3] 
+        conflict_msg_js = html.escape(conflict_msg)
+        
     print("""
     <html>
     <head>
@@ -141,8 +148,35 @@ try:
         table { 
             border-collapse:collapse; 
         }
-        th, td { 
+        th, td, .header { 
             border:2px solid white; padding:5px; 
+        }
+        .header {
+            display: flex;
+            padding: 10px;
+            text-align: left;
+            background: #0a68f5;
+            color: white;
+            font-size: 18px;
+        }
+        .header img {
+            height: 100px;
+            width: 100px;
+        }
+        .header-text {
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+        }
+        .header-text h1 {
+            margin: 0;
+        }
+        .header-text span {
+            font-size: 16px;
+        }
+        select {
+            background-color: #1f1f1f;
+            color: white;
         }
         </style>
         
@@ -173,22 +207,9 @@ try:
             const params = new URLSearchParams(window.location.search);
             const subjid = params.get("subjid");
             
-            // update the url if a student is selected  
-            window.location.href = `students.py?studid=${studid || ''}&subjid=${subjid || ''}`;
-
-            const btn = document.getElementById("enrollbtn");
-
-            // make enrollbtn visible if subject is selected. if no student selected, show ?. if already enrolled, hide.
-            if (subjid) {
-                if (enrolledsubjects.includes(subjid)) {
-                    btn.style.display = "none";
-                } else {
-                    btn.style.display = "inline-block";
-                    btn.value = `Enroll Student ID: ${studid || '?'} to Subject ID: ${subjid}`;
-                }
-            } else {
-                btn.style.display = "none";
-            }
+            // reload page with both IDs so the window load func can run checkconflict
+            const newUrl = subjid ? `students.py?studid=${studid}&subjid=${subjid}` : `students.py?studid=${studid}`;
+            window.location.href = newUrl;
         }
         
         function enrollStudent() {
@@ -223,38 +244,51 @@ try:
             }
         }
         
-        // show the current student id (if it exists) when the page is loaded
         window.addEventListener("load", () => {
             const params = new URLSearchParams(window.location.search);
             const subjid = params.get("subjid");
             const studid = params.get("studid");
             
-            const btn = document.getElementById("enrollbtn");
+            const enrollbtn = document.getElementById("enrollbtn");
+            document.getElementById("dropbtn").style.display = "none";
 
-            // make enrollbtn visible if subject is selected. if no student selected, show ?. if already enrolled, hide.
+            // enroll button logic: need both a student and subject selected
             if (subjid && studid) {
+                // already enrolled in this subject
                 if (enrolledsubjects.includes(subjid)) {
-                    btn.style.display = "none";
+                    enrollbtn.style.display = "none";
+                // schedule conflict exists, hide button, show message
+                } else if (conflictMessage && conflictMessage !== "No conflict") {
+                    enrollbtn.style.display = "none";
+                    showConflictMessage(conflictMessage);
+                // no conflict and not yet enrolled, show enroll button
                 } else {
-                    btn.style.display = "inline-block";
-                    btn.value = `Enroll Student ID: ${studid || '?'} to Subject ID: ${subjid}`;
+                    enrollbtn.style.display = "inline-block";
+                    enrollbtn.value = `Enroll Student ID: ${studid} to Subject ID: ${subjid}`;
                 }
             } else {
-                btn.style.display = "none";
+                enrollbtn.style.display = "none";
             }
-            
-            document.getElementById("dropbtn").style.display = "none";
-            showConflictMessage(conflictMessage);
         });
         </script>
     </head>
     <body>
     <table width="100%" cellpadding="10">
+        <div class="header">
+            <img src="catgulp.jpg">
+            <div class="header-text">
+                <h1>STUDENT INFORMATION SYSTEM</h1>
+                <span>UNIVERSITY NAME</span>
+            </div>
+        </div>
         <tr>
             <td colspan="2" style="padding: 10px 5px;">
                 <span>Students</span>
                 <a href="subjects.py">Subjects</a>
                 <a href="teachers.py">Teachers</a>
+                <select name="createdbcombo" id="createdbcombo">
+                    <option value="createdb">Create DB</option>
+                </select>
             </td>
         </tr>
         <tr>
@@ -279,19 +313,20 @@ try:
                     <input type="submit" value="Insert" onclick="document.getElementById('action').value='insert'">
                     <input type="submit" value="Update" onclick="document.getElementById('action').value='update'">
                     <input type="submit" value="Delete" onclick="document.getElementById('action').value='delete'">
-                    <span id="conflictmsg" style="color:red;">{html.escape(conflict_msg)}</span>
+                    <!-- form.submit will send the data back -->
+                    <input type="button" id="enrollbtn" value="" style="display:none;" onclick="enrollStudent()">
+                    <input type="button" id="dropbtn" value="" style="display:none;" onclick="dropStudent()"><br><br>
+                    <span id="conflictmsg" style="color:red;"></span>
                     
                     <input type="hidden" name="action" id="action" value="">
                     <input type="hidden" name="subjid" id="subjid">
                     
-                    <!-- form.submit will send the data back -->
-                    <input type="button" id="enrollbtn" value="" style="display:none;" onclick="enrollStudent()">
-                    <input type="button" id="dropbtn" value="" style="display:none;" onclick="dropStudent()">
+
                 </form>
             </td>
 
             <td width="70%" valign="top">
-                <h3>Students Table</h3>
+                <h3>Students Table for: """+conn.database+"""</h3>
                 <table border="1" cellpadding="5" cellspacing="0" width="100%">
                     <tr>
                         <th>ID</th>
