@@ -12,6 +12,7 @@ action = form.getvalue("action", "")
 
 tid = form.getvalue("tid", "")
 selected_subjid = form.getvalue("subjid")
+conflict_msg = ""
 
 tname = html.escape(form.getvalue("tname", ""))
 tdept = html.escape(form.getvalue("tdept", ""))
@@ -54,20 +55,18 @@ try:
         cursor.execute( "DELETE FROM teachers WHERE tid=%s", (tid,) )
         conn.commit()
         
-    elif action == "assignteacher" and tid and selected_subjid:  
-        cursor.execute(
-            "INSERT INTO assign (subjid, tid) VALUES (%s, %s)",
-            (selected_subjid, tid)
-        )
-        conn.commit()
+    elif action == "assignteacher" and tid and selected_subjid: 
+        # check for schedule conflict/teacher already assigned
+        result = cursor.callproc('checkconflict', [tid, selected_subjid, 1, None])
+        conflict_msg = result[3]   
         
-    # elif action == "dropstudent" and studid and selected_subjid:
-    #     cursor.execute(
-    #         "DELETE FROM enroll WHERE studid=%s AND subjid=%s",
-    #         (studid, selected_subjid)
-    #     )
-    #     conn.commit()
-
+        if conflict_msg == "No conflict":
+            cursor.execute(
+                "INSERT INTO assign (subjid, tid) VALUES (%s, %s)",
+                (selected_subjid, tid)
+            )
+            conn.commit()
+        
     # read all records from teachers table
     cursor.execute("SELECT tid, tname, tdept, tadd, tcontact, tstatus FROM teachers")
     rows = cursor.fetchall()
@@ -105,6 +104,14 @@ try:
 
     # for hiding assign button for teachers already assigned to a subject
     assigned_subj_ids = [str(s[0]) for s in assignedsubjects]
+    # for showing the conflict message span
+    conflict_msg_js = ""
+    
+    # page load check - check conflict to control message and button visibility
+    if tid and selected_subjid:
+        result = cursor.callproc('checkconflict', [tid, selected_subjid, 1, None])
+        conflict_msg = result[3] 
+        conflict_msg_js = html.escape(conflict_msg)
 
     print("""
     <html>
@@ -121,13 +128,52 @@ try:
         table { 
             border-collapse:collapse; 
         }
-        th, td { 
+        th, td, .header { 
             border:2px solid white; padding:5px; 
+        }
+        .header {
+            display: flex;
+            padding: 10px;
+            text-align: left;
+            background: #0a68f5;
+            color: white;
+            font-size: 18px;
+        }
+        .header img {
+            height: 100px;
+            width: 100px;
+        }
+        .header-text {
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+        }
+        .header-text h1 {
+            margin: 0;
+        }
+        .header-text span {
+            font-size: 16px;
+        }
+        select {
+            background-color: #1f1f1f;
+            color: white;
         }
         </style>
         
         <script>       
         const assignedsubjects = """ + str(assigned_subj_ids) + """;
+        const conflictMessage = """ + f'"{conflict_msg_js}"' + """;
+        
+        // show conflict message dynamically
+        function showConflictMessage(msg) {
+            const span = document.getElementById("conflictmsg");
+            span.textContent = msg;
+            if(msg && msg !== "No conflict") {
+                span.style.display = "inline";
+            } else {
+                span.style.display = "none";
+            }
+        }
         
         // copies data into the input fields to allow updating
         function fillFormTeachers(tid, tname, tdept, tadd, tcontact, tstatus) {
@@ -141,23 +187,9 @@ try:
             const params = new URLSearchParams(window.location.search);
             const subjid = params.get("subjid");
             
-            // update the url if a teacher is selected  
-            window.location.href = `teachers.py?tid=${studid || ''}&subjid=${subjid || ''}`;
-
-            const btn = document.getElementById("assignbtn");
-
-            // make assignbtn visible if teacher is selected. if no teacher selected, show ?
-            // if already assigned, hide
-            if (subjid) {
-                if (assignedsubjects.includes(subjid)) {
-                    btn.style.display = "none";
-                } else {
-                    btn.style.display = "inline-block";
-                    btn.value = `Assign Teacher ID: ${tid || '?'} to Subject ID: ${subjid}`;
-                }
-            } else {
-                btn.style.display = "none";
-            }
+            // reload page with both IDs so the server can run checkconflict
+            const newUrl = subjid ? `teachers.py?tid=${tid}&subjid=${subjid}` : `teachers.py?tid=${tid}`;
+            window.location.href = newUrl;
         }
         
         function assignTeacher() {
@@ -169,58 +201,73 @@ try:
            document.querySelector("form").submit();
         }
         
-        // function dropStudent() {
+        // function unassignTeacher() {
         //     // set the hidden action to dropstudent then execute
-        //     document.getElementById('action').value = 'dropstudent';
+        //     document.getElementById('action').value = 'unassignteacher';
         //     document.querySelector("form").submit();
         // }
         
-        // function selectSubjectToDrop(enrolledsubjid) {
+        // function selectTeacherToUnassign(enrolledsubjid) {
         //     const params = new URLSearchParams(window.location.search);
         //     const studid = params.get('studid');
-        //     const enrollbtn = document.getElementById("enrollbtn");
-        //     const dropbtn = document.getElementById("dropbtn");
+        //     const assign = document.getElementById("assignbtn");
+        //     const unassign = document.getElementById("unassignbtn");
         //     
         //     // show the dropbtn ONLY if you select a student then one enrolled subject
-        //     if (studid && enrolledsubjid) {
-        //         enrollbtn.style.display = "none";
-        //         dropbtn.style.display = "inline-block";
-        //         dropbtn.value = `Drop Student ID: ${studid} from Subject ID: ${enrolledsubjid}`;
+        //     if (tid && enrolledsubjid) {
+        //         assign.style.display = "none";
+        //         unassign.style.display = "inline-block";
+        //         unassign.value = `Unassign Teacher ID: ${tid} from Subject ID: ${enrolledsubjid}`;
         //         
         //         // store this in the hidden form field for dropSubject()
         //         document.getElementById('subjid').value = enrolledsubjid;
         //     }
         // }
         
-        // show the current teacher id (if it exists) when the page is loaded
         window.addEventListener("load", () => {
             const params = new URLSearchParams(window.location.search);
             const subjid = params.get("subjid");
             const tid = params.get("tid");
             
-            const btn = document.getElementById("assignbtn");
+            const assignbtn = document.getElementById("assignbtn");
 
-            // make assignbtn visible if teacher is selected. if no teacher selected, show ?. if already assigned, hide.
+            // enroll button logic: need both a teacher and subject selected
             if (subjid && tid) {
-                if (enrolledsubjects.includes(subjid)) {
-                    btn.style.display = "none";
+                // already assigned to this subject
+                if (assignedsubjects.includes(subjid)) {
+                    assignbtn.style.display = "none";
+                // schedule conflict exists, hide button, show message
+                } else if (conflictMessage && conflictMessage !== "No conflict") {
+                    assignbtn.style.display = "none";
+                    showConflictMessage(conflictMessage);
+                // no conflict and not yet assigned 
                 } else {
-                    btn.style.display = "inline-block";
-                    btn.value = `Assign Teacher ID: ${tid || '?'} to Subject ID: ${subjid}`;
+                    assignbtn.style.display = "inline-block";
+                    assignbtn.value = `Assign Teacher ID: ${tid} to Subject ID: ${subjid}`;
                 }
             } else {
-                btn.style.display = "none";
+                assignbtn.style.display = "none";
             }
         });
         </script>
     </head>
     <body>
     <table width="100%" cellpadding="10">
+        <div class="header">
+            <img src="catgulp.jpg">
+            <div class="header-text">
+                <h1>STUDENT INFORMATION SYSTEM</h1>
+                <span>UNIVERSITY NAME</span>
+            </div>
+        </div>
         <tr>
             <td colspan="2" style="padding: 10px 5px;">
-                <a id="studentformurl" href="students.py">Students</a>
+                <a href="students.py">Students</a>
                 <a href="subjects.py">Subjects</a>
                 <span>Teachers</span>
+                <select name="createdbcombo" id="createdbcombo">
+                    <option value="createdb">Create DB</option>
+                </select>
             </td>
         </tr>
         <tr>
@@ -245,16 +292,17 @@ try:
                     <input type="submit" value="Insert" onclick="document.getElementById('action').value='insert'">
                     <input type="submit" value="Update" onclick="document.getElementById('action').value='update'">
                     <input type="submit" value="Delete" onclick="document.getElementById('action').value='delete'">
+                    <!-- form.submit will send the data back -->
+                    <input type="button" id="assignbtn" value="" style="display:none;" onclick="assignTeacher()"><br><br>
+                    <span id="conflictmsg" style="color:red;"></span>
+                    
                     <input type="hidden" name="action" id="action" value="">
                     <input type="hidden" name="subjid" id="subjid">
-                    
-                    <!-- form.submit will send the data back -->
-                    <input type="button" id="assignbtn" value="" style="display:none;" onclick="assignTeacher()">
                 </form>
             </td>
 
             <td width="70%" valign="top">
-                <h3>Teachers Table</h3>
+                <h3>Teachers Table for: """+conn.database+"""</h3>
                 <table border="1" cellpadding="5" cellspacing="0" width="100%">
                     <tr>
                         <th>Teacher ID</th>
@@ -306,20 +354,20 @@ try:
                     </tr>                 
         """)
     
-    # # clicking a teacher shows their assigned subjects
-    # for subject in enrolledsubjects:
-    #     subjid_val = str(subject[0])
-    #     subjcode_val = html.escape(str(subject[1]))
-    #     subjdesc_val = html.escape(str(subject[2]))
-    #     subjunits_val = str(subject[3])
-    #     subjsched_val = html.escape(str(subject[4]))
-    #     print(f"<tr onclick=\"selectSubjectToDrop('{subjid_val}')\" style=\"cursor:pointer;\">")
-    #     print("<td>" + subjid_val + "</td>")
-    #     print("<td>" + subjcode_val + "</td>")
-    #     print("<td>" + subjdesc_val + "</td>")
-    #     print("<td>" + subjunits_val + "</td>")
-    #     print("<td>" + subjsched_val + "</td>")
-    #     print("</tr>") 
+    # clicking a teacher shows their assigned subjects
+    for subject in assignedsubjects:
+        subjid_val = str(subject[0])
+        subjcode_val = html.escape(str(subject[1]))
+        subjdesc_val = html.escape(str(subject[2]))
+        subjunits_val = str(subject[3])
+        subjsched_val = html.escape(str(subject[4]))
+        print(f"<tr style=\"cursor:pointer;\">")
+        print("<td>" + subjid_val + "</td>")
+        print("<td>" + subjcode_val + "</td>")
+        print("<td>" + subjdesc_val + "</td>")
+        print("<td>" + subjunits_val + "</td>")
+        print("<td>" + subjsched_val + "</td>")
+        print("</tr>") 
         
     print("""
                 </table>
