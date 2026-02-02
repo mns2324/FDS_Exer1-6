@@ -195,21 +195,38 @@ UNLOCK TABLES;
 /*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
 /*!50003 SET sql_mode              = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION' */ ;
 DELIMITER ;;
-CREATE DEFINER=`root`@`localhost` PROCEDURE `checkconflict`(in param_studid int, in param_subjid int, out result varchar(50))
-BEGIN
+CREATE DEFINER=`root`@`localhost` PROCEDURE `checkconflict`(in param_personid int, in param_subjid int, in param_mode int, out result varchar(100))
+conflictproc: BEGIN
     DECLARE i INT DEFAULT 1;
     DECLARE j INT;
     DECLARE n INT;
     DECLARE a TEXT;
     DECLARE b TEXT;
 
+    DECLARE newsched VARCHAR(25);
     DECLARE newdays VARCHAR(5);
     DECLARE newstart VARCHAR(5);
     DECLARE newend VARCHAR(5);
 
+    DECLARE oldsched VARCHAR(25);
     DECLARE olddays VARCHAR(5);
     DECLARE oldstart VARCHAR(5);
     DECLARE oldend VARCHAR(5);
+
+    DECLARE assigned_tid INT;
+
+    -- check whether a teacher is already assigned to the subject
+    -- if yes, display message and exit the procedure
+    IF param_mode = 1 THEN
+
+      SELECT tid INTO assigned_tid
+      FROM assign WHERE subjid = param_subjid LIMIT 1;
+
+      IF assigned_tid IS NOT NULL AND assigned_tid <> param_personid THEN
+          SET result = CONCAT('Subject ID ', param_subjid,' is already assigned to Teacher ID: ', assigned_tid);
+          LEAVE conflictproc; -- make a label for the sp instead of just using BEGIN
+      END IF;
+    END IF;
 
     DROP TEMPORARY TABLE IF EXISTS oldsched;
     CREATE TEMPORARY TABLE oldsched (
@@ -217,24 +234,36 @@ BEGIN
         osched text
     );
 
-    INSERT INTO oldsched(osched) 
-    SELECT subjsched FROM subjects 
-    INNER JOIN enroll ON subjects.subjid = enroll.subjid
-    WHERE enroll.studid = param_studid;
+    IF param_mode = 0 THEN
+      -- student
+      INSERT INTO oldsched(osched) 
+      SELECT subjsched FROM subjects 
+      INNER JOIN enroll ON subjects.subjid = enroll.subjid
+      WHERE enroll.studid = param_personid;
+    ELSE
+      -- teacher
+      INSERT INTO oldsched(osched) 
+      SELECT subjsched FROM subjects 
+      INNER JOIN assign ON subjects.subjid = assign.subjid
+      WHERE assign.tid = param_personid;
+    END IF;
 
+    -- get schedule of subject to be added
     SELECT 
+        subjsched,
         LEFT(subjsched,3), 
         SUBSTRING(subjsched,5,5), 
         SUBSTRING(subjsched,11,5) 
-    INTO newdays, newstart, newend
+    INTO newsched, newdays, newstart, newend
     FROM subjects WHERE subjid = param_subjid;
 
-    SELECT newdays, newstart,newend; --debug
+    SELECT newsched, newdays, newstart, newend; -- debug
 
     SELECT COUNT(*) INTO n FROM oldsched;
 
     SET result = 'No conflict';
 
+    -- bubble sort the schedules first
     WHILE i <= n DO
         SET j = 1;
 
@@ -253,22 +282,26 @@ BEGIN
         SET i = i + 1;
     END WHILE;
 
+    -- loop through every subject the student/teacher has enrolled/been assigned to
+    -- check if any of their scheds conflict with the selected subject's
     SET i = 1;
     conflict_loop: WHILE i <=n DO 
       SELECT 
-        -- MWF 09:00-11:00
+        osched,
         LEFT(osched,3),
         SUBSTRING(osched,5,5),
         SUBSTRING(osched,11,5)
-      INTO olddays, oldstart, oldend
-      FROM oldsched
-      WHERE id = i;       
+      INTO oldsched, olddays, oldstart, oldend
+      FROM oldsched as o
+      WHERE o.id = i;       
 
-      SELECT olddays,oldstart,oldend; --debug
+      SELECT olddays,oldstart,oldend; -- debug
   
       IF(olddays = newdays) THEN
         IF(oldstart < newend AND oldend > newstart) THEN
-          SET result = CONCAT('Conflict with ', olddays, ' ', oldstart, '-', oldend);
+          SET result = CONCAT(
+              'Subject ID ', param_subjid, ' (', newsched, ') conflicts with (', oldsched, ')'
+            );
           LEAVE conflict_loop; -- exit loop on first conflict spotted
         END IF;
       END IF;
