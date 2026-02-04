@@ -4,6 +4,7 @@ import cgi
 import mysql.connector
 import html
 import traceback
+from datetime import datetime
 
 print("Content-Type: text/html\n")
 
@@ -19,6 +20,73 @@ studaddress= html.escape(form.getvalue("studaddress", ""))
 studcourse = html.escape(form.getvalue("studcourse", ""))
 studgender = html.escape(form.getvalue("studgender", ""))
 yearlevel = form.getvalue("yearlevel", "")
+
+# for the create db combo box
+current_year = str(datetime.now().year)
+next_year = str(datetime.now().year + 1)
+tables = [
+    """CREATE TABLE students (
+        studid INT NOT NULL,
+        studname TEXT NOT NULL,
+        studadd TEXT,
+        studcrs TEXT,
+        studgender TEXT,
+        yrlvl TEXT,
+        PRIMARY KEY (studid)
+    )""",
+    
+    """CREATE TABLE subjects (
+        subjid INT NOT NULL,
+        subjcode TEXT,
+        subjdesc TEXT,
+        subjunits INT,
+        subjsched TEXT,
+        PRIMARY KEY (subjid)
+    )""",
+    
+    """CREATE TABLE teachers (
+        tid INT NOT NULL,
+        tname TEXT,
+        tdept TEXT,
+        tadd TEXT,
+        tcontact TEXT,
+        tstatus TEXT,
+        PRIMARY KEY (tid)
+    )""",
+    
+    """CREATE TABLE assign (
+        SubjID INT NOT NULL,
+        TID INT NOT NULL,
+        UNIQUE KEY (SubjID),
+        KEY (TID),
+        FOREIGN KEY (SubjID) REFERENCES subjects (subjid),
+        FOREIGN KEY (TID) REFERENCES teachers (tid)
+    )""",
+    
+    """CREATE TABLE enroll (
+        eid INT NOT NULL AUTO_INCREMENT,
+        studid INT,
+        subjid INT,
+        evaluation TEXT,
+        PRIMARY KEY (eid),
+        UNIQUE KEY (studid, subjid),
+        KEY (subjid),
+        FOREIGN KEY (studid) REFERENCES students (studid),
+        FOREIGN KEY (subjid) REFERENCES subjects (subjid)
+    )""",
+    
+    """CREATE TABLE grades (
+        gradeid INT NOT NULL AUTO_INCREMENT,
+        enroll_eid INT NOT NULL,
+        prelim TEXT,
+        midterm TEXT,
+        prefinal TEXT,
+        final TEXT,
+        PRIMARY KEY (gradeid),
+        UNIQUE KEY (enroll_eid),
+        FOREIGN KEY (enroll_eid) REFERENCES enroll (eid)
+    )"""
+]
 
 try:
     # connects to the mysql server
@@ -288,6 +356,9 @@ try:
                 <a href="teachers.py">Teachers</a>
                 <select name="createdbcombo" id="createdbcombo">
                     <option value="createdb">Create DB</option>
+                    <option value="1stsem">1stsem_sy"""+current_year+"""_"""+next_year+"""</option>
+                    <option value="2ndsem">2ndsem_sy"""+current_year+"""_"""+next_year+"""</option>
+                    <option value="summer">summer_sy"""+current_year+"""_"""+next_year+"""</option>
                 </select>
             </td>
         </tr>
