@@ -162,6 +162,17 @@ try:
             background-color: #1f1f1f;
             color: white;
         }
+        a {
+            display: inline-block;      
+            background-color: #0a68f5;
+            color: cyan;
+            padding: 5px;
+            border-radius: 6px;
+        }
+        #logoutbtn{
+            margin-top: 8px;
+            color: purple;
+        }
         </style>
         
         <script>  
@@ -210,7 +221,11 @@ try:
                 <a id="teacherformurl" href="teachers.py">Teachers</a>
                 <select name="createdbcombo" id="createdbcombo">
                     <option value="createdb">Create DB</option>
-                </select>
+                    <option value="1stsem">1st Sem</option>
+                    <option value="2ndsem">2nd Sem</option>
+                    <option value="summer">Summer</option>
+                </select><br>
+                <a href="index.py" id="logoutbtn">Logout</a>
             </td>
         </tr>
         <tr>
