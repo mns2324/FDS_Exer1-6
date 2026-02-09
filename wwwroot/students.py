@@ -22,10 +22,11 @@ studgender = html.escape(form.getvalue("studgender", ""))
 yearlevel = form.getvalue("yearlevel", "")
 
 # for the create db combo box
+createdbcombo = form.getvalue("createdbcombo", "")
 current_year = str(datetime.now().year)
 next_year = str(datetime.now().year + 1)
 tables = [
-    """CREATE TABLE students (
+    """CREATE TABLE IF NOT EXISTS students (
         studid INT NOT NULL,
         studname TEXT NOT NULL,
         studadd TEXT,
@@ -33,18 +34,18 @@ tables = [
         studgender TEXT,
         yrlvl TEXT,
         PRIMARY KEY (studid)
-    )""",
+    ) ENGINE=InnoDB """,
     
-    """CREATE TABLE subjects (
+    """CREATE TABLE IF NOT EXISTS subjects (
         subjid INT NOT NULL,
         subjcode TEXT,
         subjdesc TEXT,
         subjunits INT,
         subjsched TEXT,
         PRIMARY KEY (subjid)
-    )""",
+    ) ENGINE=InnoDB """,
     
-    """CREATE TABLE teachers (
+    """CREATE TABLE IF NOT EXISTS teachers (
         tid INT NOT NULL,
         tname TEXT,
         tdept TEXT,
@@ -52,18 +53,18 @@ tables = [
         tcontact TEXT,
         tstatus TEXT,
         PRIMARY KEY (tid)
-    )""",
+    ) ENGINE=InnoDB """,
     
-    """CREATE TABLE assign (
+    """CREATE TABLE IF NOT EXISTS assign (
         SubjID INT NOT NULL,
         TID INT NOT NULL,
         UNIQUE KEY (SubjID),
         KEY (TID),
         FOREIGN KEY (SubjID) REFERENCES subjects (subjid),
         FOREIGN KEY (TID) REFERENCES teachers (tid)
-    )""",
+    ) ENGINE=InnoDB """,
     
-    """CREATE TABLE enroll (
+    """CREATE TABLE IF NOT EXISTS enroll (
         eid INT NOT NULL AUTO_INCREMENT,
         studid INT,
         subjid INT,
@@ -73,9 +74,9 @@ tables = [
         KEY (subjid),
         FOREIGN KEY (studid) REFERENCES students (studid),
         FOREIGN KEY (subjid) REFERENCES subjects (subjid)
-    )""",
+    ) ENGINE=InnoDB """,
     
-    """CREATE TABLE grades (
+    """CREATE TABLE IF NOT EXISTS grades (
         gradeid INT NOT NULL AUTO_INCREMENT,
         enroll_eid INT NOT NULL,
         prelim TEXT,
@@ -85,8 +86,11 @@ tables = [
         PRIMARY KEY (gradeid),
         UNIQUE KEY (enroll_eid),
         FOREIGN KEY (enroll_eid) REFERENCES enroll (eid)
-    )"""
+    ) ENGINE=InnoDB """
 ]
+
+dbuser = form.getvalue("dbuser", "")
+dbpass = form.getvalue("dbpass", "")
 
 try:
     # connects to the mysql server
@@ -246,6 +250,26 @@ try:
             background-color: #1f1f1f;
             color: white;
         }
+        a {
+            display: inline-block;      
+            background-color: #0a68f5;
+            color: cyan;
+            padding: 5px;
+            border-radius: 6px;
+        }
+        #logoutbtn{
+            background-color: white;
+            color: red;
+        }
+        .nav-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .nav-bar form {
+            margin: 0;
+        }
+
         </style>
         
         <script>
@@ -351,15 +375,23 @@ try:
         </div>
         <tr>
             <td colspan="2" style="padding: 10px 5px;">
-                <span>Students</span>
-                <a href="subjects.py">Subjects</a>
-                <a href="teachers.py">Teachers</a>
-                <select name="createdbcombo" id="createdbcombo">
-                    <option value="createdb">Create DB</option>
-                    <option value="1stsem">1stsem_sy"""+current_year+"""_"""+next_year+"""</option>
-                    <option value="2ndsem">2ndsem_sy"""+current_year+"""_"""+next_year+"""</option>
-                    <option value="summer">summer_sy"""+current_year+"""_"""+next_year+"""</option>
-                </select>
+                <div class="nav-bar">
+                    <span>Students</span>
+                    <a href="subjects.py">Subjects</a>
+                    <a href="teachers.py">Teachers</a>
+                    
+                    <form method="post" action="students.py">                        
+                        <select name="createdbcombo" id="createdbcombo" onchange="this.form.submit()"> <!-- submit the selected value -->
+                            <option value="">Create DB</option>
+                            <option value="1stsem">1st Sem</option>
+                            <option value="2ndsem">2nd Sem</option>
+                            <option value="summer">Summer</option>
+                        </select><br>
+                        <input type="hidden" name="action" value="createdb">
+                    </form>
+                    
+                    <a href="index.py" id="logoutbtn">Logout</a>
+                </div>
             </td>
         </tr>
         <tr>
@@ -409,6 +441,55 @@ try:
                         <th>Total Units</th>
                     </tr>
     """)
+    
+    # get the value that was pressed in the combo box
+    if action == "createdb" and createdbcombo != "":
+        dbname = f"{createdbcombo}_sy{current_year}_{next_year}"
+        
+        try:
+            conn_createdb = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="root"
+            )
+            cursor_createdb = conn_createdb .cursor()
+                   
+            # if it already exists, do nothing   
+            cursor_createdb.execute("SHOW DATABASES LIKE %s", (dbname,))
+            if cursor_createdb.fetchone():
+                print(f"<h3>{dbname} already exists</h3>")
+            else:
+                cursor_createdb.execute(f"CREATE DATABASE `{dbname}`")
+                conn_createdb.commit()
+                    
+            conn_createdb.close()
+                
+            conn_tables = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="root",
+                database=dbname
+            )
+            cursor_tables = conn_tables.cursor()   
+                     
+            for table_sql in tables:
+                cursor_tables.execute(table_sql)
+            conn_tables.commit()
+    
+            print(f"""
+                <script>
+                    alert("Database {dbname} successfully.");
+                </script>
+            """)
+                
+            conn_tables.close()
+    
+        except Exception as e:
+            print(f"<pre>{e}</pre>")
+
+        finally:
+            if 'conn' in locals():
+                conn.close()
 
     # clicking a row fills the form fields/input boxes
     for i in range(len(rows)):
