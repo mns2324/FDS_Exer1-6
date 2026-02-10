@@ -110,10 +110,17 @@ try:
 
     # crud operations 
     if action == "insert" and studname and studaddress and studcourse and studgender and yearlevel:
+        studuser = f"{next_studid}{studname.replace(' ', '').lower()}" # force lowercase and remove whitespace
+        studpw = f"AdDU{studname}"
+
         cursor.execute(
             "INSERT INTO students (studid, studname, studadd, studcrs, studgender, yrlvl) VALUES (%s, %s, %s, %s, %s, %s)",
             (next_studid, studname, studaddress, studcourse, studgender, yearlevel)
         )
+        
+        cursor.execute(f"CREATE USER IF NOT EXISTS '{studuser}'@'localhost' IDENTIFIED BY '{studpw}'")
+        # change dis to work with the databases from createdb
+        cursor.execute(f"GRANT SELECT ON enrollmentsystem.* TO '{studuser}'@'localhost'")
         conn.commit()
 
     elif action == "update" and studid and studname and studaddress and studcourse and studgender and yearlevel:
@@ -124,8 +131,18 @@ try:
         conn.commit()
 
     elif action == "delete" and studid:
-        cursor.execute( "DELETE FROM students WHERE studid=%s", (studid,) )
-        conn.commit()
+        try:
+            studuser = f"{studid}{studname.replace(' ', '').lower()}" 
+
+            cursor.execute( "DELETE FROM students WHERE studid=%s", (studid,) )
+            cursor.execute(f"DROP USER IF EXISTS '{studuser}'@'localhost'")
+            conn.commit()
+        except Exception:
+            print(f"""
+                <script>
+                    alert("Unable to delete student {studid} as they still have enrolled subjects.");
+                </script>
+            """)
         
     elif action == "enrollstudent" and studid and selected_subjid:  
         # check for schedule conflict
@@ -310,13 +327,13 @@ try:
            
            // set the hidden action to enrollstudent then execute
            document.getElementById('action').value = 'enrollstudent';
-           document.querySelector("form").submit();
+           document.getElementById("studentForm").submit();
         }
         
         function dropStudent() {
             // set the hidden action to dropstudent then execute
             document.getElementById('action').value = 'dropstudent';
-            document.querySelector("form").submit();
+            document.getElementById("studentForm").submit();
         }
         
         function selectSubjectToDrop(enrolledsubjid) {
@@ -330,7 +347,7 @@ try:
                 enrollbtn.style.display = "none";
                 dropbtn.style.display = "inline-block";
                 dropbtn.value = `Drop Student ID: ${studid} from Subject ID: ${enrolledsubjid}`;
-                
+
                 // store this in the hidden form field for dropSubject()
                 document.getElementById('subjid').value = enrolledsubjid;
             }
@@ -380,7 +397,7 @@ try:
                     <a href="subjects.py">Subjects</a>
                     <a href="teachers.py">Teachers</a>
                     
-                    <form method="post" action="students.py">                        
+                    <form id="createDbForm" action="students.py" method="post">                        
                         <select name="createdbcombo" id="createdbcombo" onchange="this.form.submit()"> <!-- submit the selected value -->
                             <option value="">Create DB</option>
                             <option value="1stsem">1st Sem</option>
@@ -397,8 +414,12 @@ try:
         <tr>
             <td width="30%" valign="top">
                 <h3>Student Form</h3>
-                <!-- submit data back to this script -->
-                <form action="students.py" method="post">
+
+                <!-- big fyi: since there are now 2 forms in this file, an id is required
+                so that .submit() recognizes the correct form to submit to keep the logic working
+                (earlier it was only submitting the form that was first in order [createdb]) -->
+
+                <form id="studentForm" action="students.py" method="post">
                     Student ID:<br>
                     <input type="text" name="studid" id="studid" readonly value="""+studid_val+"""><br>
                     Student Name:<br>
@@ -452,48 +473,51 @@ try:
                 user="root",
                 password="root"
             )
-            cursor_createdb = conn_createdb .cursor()
+            cursor_createdb = conn_createdb.cursor()
                    
             # if it already exists, do nothing   
             cursor_createdb.execute("SHOW DATABASES LIKE %s", (dbname,))
             if cursor_createdb.fetchone():
-                print(f"<h3>{dbname} already exists</h3>")
+                print(f"""
+                    <script>
+                        alert("{dbname} already exists.");
+                    </script>
+                """)
             else:
                 cursor_createdb.execute(f"CREATE DATABASE `{dbname}`")
-                conn_createdb.commit()
+                conn_createdb.commit()                    
+                          
+                conn_tables = mysql.connector.connect(
+                    host="localhost",
+                    user="root",
+                    password="root",
+                    database=dbname
+                )
+                cursor_tables = conn_tables.cursor()   
+                        
+                for table_sql in tables:
+                    cursor_tables.execute(table_sql)
+                conn_tables.commit()
+        
+                print(f"""
+                    <script>
+                        alert("Database {dbname} created successfully.");
+                    </script>
+                """)
                     
-            conn_createdb.close()
-                
-            conn_tables = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="root",
-                database=dbname
-            )
-            cursor_tables = conn_tables.cursor()   
-                     
-            for table_sql in tables:
-                cursor_tables.execute(table_sql)
-            conn_tables.commit()
-    
-            print(f"""
-                <script>
-                    alert("Database {dbname} successfully.");
-                </script>
-            """)
-                
-            conn_tables.close()
+                conn_tables.close()
     
         except Exception as e:
             print(f"<pre>{e}</pre>")
 
         finally:
-            if 'conn' in locals():
-                conn.close()
+            if 'conn_createdb' in locals():
+                conn_createdb.close()
+            if 'conn_tables' in locals():
+                conn_tables.close()
 
     # clicking a row fills the form fields/input boxes
     for i in range(len(rows)):
-        # studid, studname, studaddress, studcourse, studgender, yearlevel
         studid_val = str(rows[i][0])
         studname_val = str(rows[i][1])
         studaddress_val = html.escape(str(rows[i][2]))
