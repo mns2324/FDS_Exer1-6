@@ -38,10 +38,16 @@ try:
 
     # crud operations 
     if action == "insert" and tname and tdept and tadd and tcontact and tstatus:
+        teachuser = f"{next_tid}{tname.replace(' ', '').lower()}" # force lowercase and remove whitespace
+        teachpw = f"AdDU{tname}"
+
         cursor.execute(
             "INSERT INTO teachers (tid, tname, tdept, tadd, tcontact, tstatus) VALUES (%s, %s, %s, %s, %s, %s)",
             (next_tid, tname, tdept, tadd, tcontact, tstatus)
         )
+
+        cursor.execute(f"CREATE USER IF NOT EXISTS '{teachuser}'@'localhost' IDENTIFIED BY '{teachpw}'")
+        cursor.execute(f"GRANT SELECT, INSERT, UPDATE, EXECUTE ON enrollmentsystem.* TO '{teachuser}'@'localhost'")
         conn.commit()
 
     elif action == "update" and tid and tname and tdept and tadd and tcontact and tstatus:
@@ -52,8 +58,18 @@ try:
         conn.commit()
 
     elif action == "delete" and tid:
-        cursor.execute( "DELETE FROM teachers WHERE tid=%s", (tid,) )
-        conn.commit()
+        try:
+            teachuser = f"{tid}{tname.replace(' ', '').lower()}"
+
+            cursor.execute( "DELETE FROM teachers WHERE tid=%s", (tid,) )
+            cursor.execute(f"DROP USER IF EXISTS '{teachuser}'@'localhost'")
+            conn.commit()
+        except Exception:
+            print(f"""
+                <script>
+                    alert("Unable to delete teacher {tid} as they still have assigned subjects.");
+                </script>
+            """)
         
     elif action == "assignteacher" and tid and selected_subjid: 
         # check for schedule conflict/teacher already assigned
@@ -66,6 +82,13 @@ try:
                 (selected_subjid, tid)
             )
             conn.commit()
+
+    elif action == "unassignteacher" and tid and selected_subjid:
+        cursor.execute(
+            "DELETE FROM assign WHERE tid=%s AND subjid=%s",
+            (tid, selected_subjid)
+        )
+        conn.commit()
         
     # read all records from teachers table
     cursor.execute("SELECT tid, tname, tdept, tadd, tcontact, tstatus FROM teachers")
@@ -212,28 +235,27 @@ try:
            document.querySelector("form").submit();
         }
         
-        // function unassignTeacher() {
-        //     // set the hidden action to dropstudent then execute
-        //     document.getElementById('action').value = 'unassignteacher';
-        //     document.querySelector("form").submit();
-        // }
+        function unassignTeacher() {
+            document.getElementById('action').value = 'unassignteacher';
+            document.querySelector("form").submit();
+        }
         
-        // function selectTeacherToUnassign(enrolledsubjid) {
-        //     const params = new URLSearchParams(window.location.search);
-        //     const studid = params.get('studid');
-        //     const assign = document.getElementById("assignbtn");
-        //     const unassign = document.getElementById("unassignbtn");
-        //     
-        //     // show the dropbtn ONLY if you select a student then one enrolled subject
-        //     if (tid && enrolledsubjid) {
-        //         assign.style.display = "none";
-        //         unassign.style.display = "inline-block";
-        //         unassign.value = `Unassign Teacher ID: ${tid} from Subject ID: ${enrolledsubjid}`;
-        //         
-        //         // store this in the hidden form field for dropSubject()
-        //         document.getElementById('subjid').value = enrolledsubjid;
-        //     }
-        // }
+        function selectSubjectToUnassign(enrolledsubjid) {
+            const params = new URLSearchParams(window.location.search);
+            const tid = params.get('tid');
+            const assign = document.getElementById("assignbtn");
+            const unassign = document.getElementById("unassignbtn");
+            
+            // show the dropbtn ONLY if you select a teacher then one assigned subject
+            if (tid && enrolledsubjid) {
+                assign.style.display = "none";
+                unassign.style.display = "inline-block";
+                unassign.value = `Unassign Teacher ID: ${tid} from Subject ID: ${enrolledsubjid}`;
+                
+                // store this in the hidden form field for dropSubject()
+                document.getElementById('subjid').value = enrolledsubjid;
+            }
+        }
         
         window.addEventListener("load", () => {
             const params = new URLSearchParams(window.location.search);
@@ -241,8 +263,9 @@ try:
             const tid = params.get("tid");
             
             const assignbtn = document.getElementById("assignbtn");
+            document.getElementById("unassignbtn").style.display = "none";
 
-            // enroll button logic: need both a teacher and subject selected
+            // assign button logic: need both a teacher and subject selected
             if (subjid && tid) {
                 // already assigned to this subject
                 if (assignedsubjects.includes(subjid)) {
@@ -308,7 +331,8 @@ try:
                     <input type="submit" value="Update" onclick="document.getElementById('action').value='update'">
                     <input type="submit" value="Delete" onclick="document.getElementById('action').value='delete'">
                     <!-- form.submit will send the data back -->
-                    <input type="button" id="assignbtn" value="" style="display:none;" onclick="assignTeacher()"><br><br>
+                    <input type="button" id="assignbtn" value="" style="display:none;" onclick="assignTeacher()">
+                    <input type="button" id="unassignbtn" value="" style="display:none;" onclick="unassignTeacher()"><br><br>
                     <span id="conflictmsg" style="color:red;"></span>
                     
                     <input type="hidden" name="action" id="action" value="">
@@ -376,7 +400,7 @@ try:
         subjdesc_val = html.escape(str(subject[2]))
         subjunits_val = str(subject[3])
         subjsched_val = html.escape(str(subject[4]))
-        print(f"<tr style=\"cursor:pointer;\">")
+        print(f"<tr onclick=\"selectSubjectToUnassign('{subjid_val}')\" style=\"cursor:pointer;\">")
         print("<td>" + subjid_val + "</td>")
         print("<td>" + subjcode_val + "</td>")
         print("<td>" + subjdesc_val + "</td>")
