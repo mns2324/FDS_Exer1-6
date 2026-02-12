@@ -62,6 +62,7 @@ try:
             teachuser = f"{tid}{tname.replace(' ', '').lower()}"
 
             cursor.execute( "DELETE FROM teachers WHERE tid=%s", (tid,) )
+            cursor.execute(f"REVOKE SELECT, INSERT, UPDATE, EXECUTE ON enrollmentsystem.* TO '{teachuser}'@'localhost'")
             cursor.execute(f"DROP USER IF EXISTS '{teachuser}'@'localhost'")
             conn.commit()
         except Exception:
