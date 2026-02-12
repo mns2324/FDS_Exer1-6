@@ -21,6 +21,8 @@ studcourse = html.escape(form.getvalue("studcourse", ""))
 studgender = html.escape(form.getvalue("studgender", ""))
 yearlevel = form.getvalue("yearlevel", "")
 
+schoolyearcombo = form.getvalue("schoolyearcombo", "")
+
 # for the create db combo box
 createdbcombo = form.getvalue("createdbcombo", "")
 current_year = str(datetime.now().year)
@@ -92,13 +94,23 @@ tables = [
 dbuser = form.getvalue("dbuser", "")
 dbpass = form.getvalue("dbpass", "")
 
+if schoolyearcombo:
+    target_database = schoolyearcombo
+else:
+    target_database = "enrollmentsystem"
+
 try:
     # connects to the mysql server
     conn = mysql.connector.connect(
         host="localhost",
+        user=dbuser,
+        password=dbpass,
+        database=target_database
+    )
+    root_conn = mysql.connector.connect(
+        host="localhost",
         user="root",
-        password="root",
-        database="enrollmentsystem"
+        password="root"
     )
 
     # allow execution of sql queries
@@ -117,11 +129,12 @@ try:
             "INSERT INTO students (studid, studname, studadd, studcrs, studgender, yrlvl) VALUES (%s, %s, %s, %s, %s, %s)",
             (next_studid, studname, studaddress, studcourse, studgender, yearlevel)
         )
-        
-        cursor.execute(f"CREATE USER IF NOT EXISTS '{studuser}'@'localhost' IDENTIFIED BY '{studpw}'")
-        # change dis to work with the databases from createdb
-        cursor.execute(f"GRANT SELECT ON enrollmentsystem.* TO '{studuser}'@'localhost'")
         conn.commit()
+
+        root_cursor = root_conn.cursor()
+        root_cursor.execute(f"CREATE USER IF NOT EXISTS '{studuser}'@'localhost' IDENTIFIED BY '{studpw}'")
+        root_cursor.execute(f"GRANT SELECT ON {target_database}.* TO '{studuser}'@'localhost'")
+        root_conn.commit()
 
     elif action == "update" and studid and studname and studaddress and studcourse and studgender and yearlevel:
         cursor.execute(
@@ -135,8 +148,35 @@ try:
             studuser = f"{studid}{studname.replace(' ', '').lower()}" 
 
             cursor.execute( "DELETE FROM students WHERE studid=%s", (studid,) )
-            cursor.execute(f"DROP USER IF EXISTS '{studuser}'@'localhost'")
             conn.commit()
+
+            root_cursor = root_conn.cursor()
+
+            try:
+                root_cursor.execute(f"REVOKE SELECT ON {target_database}.* FROM '{studuser}'@'localhost'")
+                root_conn.commit()
+            except mysql.connector.Error:
+                # If revoke fails (user doesn't have grants on this db), continue
+                pass
+            
+            # Check if user still has access to ANY other databases
+            root_cursor.execute(f"SHOW GRANTS FOR '{studuser}'@'localhost'")
+            grants = root_cursor.fetchall()
+            
+            # If user only has USAGE grant (no actual database permissions), delete the user
+            has_database_access = False
+            for grant in grants:
+                grant_str = str(grant[0])
+                # Check if there are any database-specific grants other than USAGE
+                if "ON `" in grant_str and "USAGE" not in grant_str:
+                    has_database_access = True
+                    break
+            
+            if not has_database_access:
+                # User has no remaining database access, safe to drop
+                root_cursor.execute(f"DROP USER IF EXISTS '{studuser}'@'localhost'")
+                root_conn.commit()
+
         except Exception:
             print(f"""
                 <script>
@@ -292,6 +332,7 @@ try:
         <script>
         const enrolledsubjects = """ + str(enrolled_subj_ids) + """;
         const conflictMessage = """ + f'"{conflict_msg_js}"' + """;
+        const schoolyearcombo = """ + f'"{html.escape(schoolyearcombo)}"' + """;
 
         // show conflict message dynamically
         function showConflictMessage(msg) {
@@ -317,7 +358,8 @@ try:
             const subjid = params.get("subjid");
             
             // reload page with both IDs so the window load func can run checkconflict
-            const newUrl = subjid ? `students.py?studid=${studid}&subjid=${subjid}` : `students.py?studid=${studid}`;
+            let newUrl = `students.py?studid=${studid}`;
+            if (subjid) newUrl += `&subjid=${subjid}`;
             window.location.href = newUrl;
         }
         
