@@ -11,10 +11,9 @@ form = cgi.FieldStorage()
 action = form.getvalue("action", "login")
 dbuser = form.getvalue("dbuser", "")
 dbpass = form.getvalue("dbpass", "")
-schoolyearcombo = form.getvalue("schoolyearcombo", "")
+login_fail = False
 logged_in = False
 user_exists = False
-login_fail = False
 
 if action == "login":
     try:
@@ -40,32 +39,36 @@ if action == "login":
                     password=dbpass
                 )
                 user_exists = True
-
-                test_cursor = test_conn.cursor()
-                test_cursor.execute(f"SHOW GRANTS FOR '{dbuser}'@'localhost'")
-                grants = test_cursor.fetchall()
-
-                # extract the database names from the grants
-                for grant_tuple in grants:
-                    grant_str = str(grant_tuple[0])
-                    if "SELECT" in grant_str and "ON `" in grant_str:
-                        start = grant_str.find("ON `") + 4
-                        end = grant_str.find("`", start)
-                        db_name = grant_str[start:end]
-
-                        if db_name in school_year_dbs:
-                            accessible_dbs.append(db_name)
-
+                
+                for db in school_year_dbs:
+                    try:
+                        test_db_conn = mysql.connector.connect(
+                            host="localhost",
+                            user=dbuser,
+                            password=dbpass,
+                            database=db
+                        )
+                        accessible_dbs.append(db)
+                        test_db_conn.close()
+                    except mysql.connector.Error:
+                        pass
+                    
                 test_conn.close()
+                
             except mysql.connector.Error:
+                logged_in = False
                 login_fail = True
-
-        # change db dropdown options based on enroll status
-        if user_exists and accessible_dbs:
+                tb = traceback.format_exc()
+                print("<h2>Error</h2>")
+                print(f"<pre>{tb}</pre>")
+                
+        if user_exists:
             display_dbs = accessible_dbs
-        else:
-            display_dbs = school_year_dbs
             
+        print(f"<h3>DEBUG</h3>")
+        print(f"user_exists: {user_exists}<br>")
+        print(f"accessible_dbs: {accessible_dbs}<br>")
+         
         print("""
         <html>
         <head>
@@ -135,26 +138,25 @@ if action == "login":
                 <td width="30%" valign="top">
                     <h3>Login</h3>
                     <!-- submit dbuser and dbpass to students.py -->
-                    <form action="index.py" method="post" id="loginform">
+                    <form action="students.py" method="post" id="loginform">
                     
                         <input type="hidden" name="action" id="action" value="login">
-                    
+                        <input type="hidden" name="dbuser" value=""" + html.escape(dbuser) + """>
+                        <input type="hidden" name="dbpass" value=""" + html.escape(dbpass) + """>
+  
                         Username:<br>
-                        <input type="text" name="dbuser" id="username" value="""+html.escape(dbuser)+"""><br>
+                        <input type="text" name="dbuser" value=""><br>
                         Password:<br>
-                        <input type="password" name="dbpass" id="password"><br><br>
+                        <input type="password" name="dbpass"><br><br>
                         
                         <div id="sydiv"> 
                             School Year:<br> 
-                            <select name="schoolyearcombo" id="schoolyearcombo" required>
-                                <option value="">--- Select Semester ---</option>
+                            <select name="schoolyearcombo">
         """)
             
         # populate school year dropdown with available databases
-        # keep the same option selected it the site is reloaded
-        for db in display_dbs:
-            selected = 'selected' if db == schoolyearcombo else ''
-            print(f'<option value="{db}" {selected}>{db}</option>')
+        for db in school_year_dbs:
+            print(f'<option value="{db}">{db}</option>')
             
         print("""                                
                             </select><br><br>    
@@ -180,61 +182,20 @@ if action == "login":
             var loginForm = document.getElementById('loginform');
             var loginbtn = document.getElementById('loginbtn');
             var action = document.getElementById('action');
-            var sydiv = document.getElementById('sydiv');
-            var schoolyearcombo = document.getElementById('schoolyearcombo');
-
-            function storeUsername() {
-                const username = document.getElementById('username').value;
-                if (username) {
-                    const expirationDate = new Date();
-                    expirationDate.setDate(expirationDate.getDate() + 7); // cookie expires in 7 days
-                    document.cookie = `username=${username}; expires=${expirationDate.toUTCString()}; path=/`;
-                }
-            }
-
-            // w3schools getCookie: if cookie is found, return its value.
-            function getCookie(name) {
-                const nameEQ = name + "=";
-                const decodedCookie = decodeURIComponent(document.cookie);
-                const ca = decodedCookie.split(';');
-                for(let i = 0; i < ca.length; i++) {
-                    let c = ca[i];
-                    while (c.charAt(0) === ' ') c = c.substring(1, c.length);
-                    if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
-                }
-                return '';
-            }
-
-            const storedUsername = getCookie('username');
-            if (storedUsername !== '') {
-                document.getElementById('username').value = storedUsername;
-            }
             
-            // update ui based on login state
             if (userExists){
                 loginbtn.textContent = 'Continue';
                 action.value = 'continue';
-                sydiv.style.display = 'block';
-            } else {
-                sydiv.style.display = 'none';
             }
-
-            loginForm.addEventListener('submit', function(e){
-                storeUsername();
-                
-                if(!userExists){
+            
+            loginForm.addEventListener('submit', function(){
+                if (!userExists) {
                     loginForm.action = 'index.py';
                     action.value = 'login';
                 } else {
-                    const selectedSY = schoolyearcombo.value;
-                    if (!selectedSY || selectedSY === '') {
-                        e.preventDefault();
-                        alert('Please select a school year to continue.');
-                    }
                     loginForm.action = 'students.py';
                     action.value = 'continue';
                 }
-                
             });
         </script>
         </html>
@@ -264,4 +225,3 @@ elif action == "continue":
     </body>
     </html>
     """)
-
