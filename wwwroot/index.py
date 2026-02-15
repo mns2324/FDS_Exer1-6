@@ -4,18 +4,57 @@ import cgi
 import mysql.connector
 import html
 import traceback
-
-print("Content-Type: text/html\n")
+import http.cookies
 
 form = cgi.FieldStorage()
 action = form.getvalue("action", "login")
 dbuser = form.getvalue("dbuser", "")
 dbpass = form.getvalue("dbpass", "")
 login_fail = False
-logged_in = False
 user_exists = False
 
-if action == "login":
+cookie = http.cookies.SimpleCookie()
+cookie["dbuser"] = dbuser
+cookie["dbpass"] = dbpass
+cookie["schoolyearcombo"] = form.getvalue("schoolyearcombo", "")
+
+# expire in 2 hours
+for key in cookie:
+    cookie[key]["max-age"] = 7200
+    cookie[key]["path"] = "/"
+    
+### place these action blocks here (has redirect header) before the content header so that they arent printed literally
+# redirect to students.py when continue is clicked with this http header
+if action == "continue":  
+    print("Status: 302 Found")
+    print(cookie.output())
+    print("Location: students.py")
+    print()
+    exit()
+
+# clicking the logout href from any of the 3 pages should execute this
+if action == "logout":
+    # set these to expire immediately
+    expired_cookie = http.cookies.SimpleCookie()
+    expired_cookie["dbuser"] = ""
+    expired_cookie["dbpass"] = ""
+    expired_cookie["schoolyearcombo"] = ""
+    
+    for key in cookie:
+        expired_cookie[key]["max-age"] = 0
+        expired_cookie[key]["path"] = "/"
+        
+    print("Status: 302 Found")
+    print(expired_cookie.output())
+    print("Location: index.py")
+    print()
+    exit()
+
+print("Content-Type: text/html\n") 
+
+# connect to root first to get the school year databases
+# then attempt to connect to the database with the form credentials
+if action == "login":    
     try:
         conn = mysql.connector.connect(
             host="localhost",
@@ -24,7 +63,6 @@ if action == "login":
             database="enrollmentsystem"
         )
         
-        logged_in = True
         cursor = conn.cursor()
         
         cursor.execute("SHOW DATABASES LIKE '%_sy____\_____'") 
@@ -40,34 +78,36 @@ if action == "login":
                 )
                 user_exists = True
                 
-                for db in school_year_dbs:
-                    try:
-                        test_db_conn = mysql.connector.connect(
-                            host="localhost",
-                            user=dbuser,
-                            password=dbpass,
-                            database=db
-                        )
-                        accessible_dbs.append(db)
-                        test_db_conn.close()
-                    except mysql.connector.Error:
-                        pass
+                # return the list of databases that the user has access to
+                # for db in school_year_dbs:
+                #     try:
+                #         test_db_conn = mysql.connector.connect(
+                #             host="localhost",
+                #             user=dbuser,
+                #             password=dbpass,
+                #             database=db
+                #         )
+                #         accessible_dbs.append(db)
+                #         test_db_conn.close()
+                #     except mysql.connector.Error:
+                #         pass
                     
                 test_conn.close()
                 
             except mysql.connector.Error:
-                logged_in = False
                 login_fail = True
-                tb = traceback.format_exc()
-                print("<h2>Error</h2>")
-                print(f"<pre>{tb}</pre>")
+                pass
                 
-        if user_exists:
+        if user_exists == True:
             display_dbs = accessible_dbs
             
-        print(f"<h3>DEBUG</h3>")
-        print(f"user_exists: {user_exists}<br>")
-        print(f"accessible_dbs: {accessible_dbs}<br>")
+        # print(f"<h3>DEBUG</h3>")
+        # print(f"user_exists: {user_exists}<br>")
+        # print(f"accessible_dbs: {accessible_dbs}<br>")
+        # print("<h3>cookies: </h3>")
+        # for key in cookie:
+        #     print(f"{key} = {cookie[key].value}<br>")
+
          
         print("""
         <html>
@@ -115,6 +155,9 @@ if action == "login":
                 border-color: #c51244;
             }
             #error-message {
+                border:2px solid red; 
+                padding: 8px;
+                width: fit-content;
                 color: #ff4444;
                 display: """ + ('block' if login_fail else 'none') + """;
                 margin-top: 10px;
@@ -137,12 +180,18 @@ if action == "login":
             <tr>
                 <td width="30%" valign="top">
                     <h3>Login</h3>
-                    <!-- submit dbuser and dbpass to students.py -->
-                    <form action="students.py" method="post" id="loginform">
+                    <!-- submit dbuser and dbpass to index.py -->
+                    <!-- cookies will be the one to relay this info to students.py -->
+                    <form action="index.py" method="post" id="loginform">
                     
+                        <!-- 
+                            the if else block is imperative here. without it, the second login fail will 
+                            return an error as the form values would have duplicated, creating a list.
+                            AttributeError: 'list' object has no attribute 'strip'
+                        -->
                         <input type="hidden" name="action" id="action" value="login">
-                        <input type="hidden" name="dbuser" value=""" + html.escape(dbuser) + """>
-                        <input type="hidden" name="dbpass" value=""" + html.escape(dbpass) + """>
+                        <input type="hidden" name="dbuser" value=""" + (html.escape(dbuser) if user_exists else "") + """>
+                        <input type="hidden" name="dbpass" value=""" + (html.escape(dbpass) if user_exists else "") + """>
   
                         Username:<br>
                         <input type="text" name="dbuser" value=""><br>
@@ -172,7 +221,7 @@ if action == "login":
                     <h3>Please log in to continue.</h3>
                     
                     <div id="error-message">
-                        Invalid username or password. Please try again.
+                        Invalid username or password. Please try again!
                     </div>
                 </td>
             </tr>
@@ -190,10 +239,8 @@ if action == "login":
             
             loginForm.addEventListener('submit', function(){
                 if (!userExists) {
-                    loginForm.action = 'index.py';
                     action.value = 'login';
                 } else {
-                    loginForm.action = 'students.py';
                     action.value = 'continue';
                 }
             });
@@ -212,16 +259,4 @@ if action == "login":
     finally:
         if 'conn' in locals():
             conn.close()
-            
-elif action == "continue":
-    print("Content-Type: text/html\n")
-    print("""
-    <html>
-    <head>
-        <meta http-equiv="refresh" content="0;url=students.py">
-    </head>
-    <body>
-        <p>Redirecting...</p>
-    </body>
-    </html>
-    """)
+        
