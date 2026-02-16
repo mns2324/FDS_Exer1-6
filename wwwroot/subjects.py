@@ -4,6 +4,22 @@ import cgi
 import mysql.connector
 import html
 import traceback
+from datetime import datetime
+import os 
+import http.cookies
+
+cookies = http.cookies.SimpleCookie(os.environ.get("HTTP_COOKIE", ""))
+
+dbuser = cookies["dbuser"].value if "dbuser" in cookies else ""
+dbpass = cookies["dbpass"].value if "dbpass" in cookies else ""
+selected_db_from_index = cookies["schoolyearcombo"].value if "schoolyearcombo" in cookies else "enrollmentsystem"
+
+# redirect back to index if not logged in
+if not dbuser or not dbpass:
+    print("Status: 302 Found")
+    print("Location: index.py")
+    print()
+    exit()
 
 print("Content-Type: text/html\n")
 
@@ -18,16 +34,82 @@ subjdesc = html.escape(form.getvalue("subjdesc", ""))
 subjunits = html.escape(form.getvalue("subjunits", ""))
 subjsched = html.escape(form.getvalue("subjsched", ""))
 
+# for the create db combo box
+createdbcombo = form.getvalue("createdbcombo", "")
+current_year = str(datetime.now().year)
+next_year = str(datetime.now().year + 1)
+tables = [
+    """CREATE TABLE IF NOT EXISTS students (
+        studid INT NOT NULL,
+        studname TEXT NOT NULL,
+        studadd TEXT,
+        studcrs TEXT,
+        studgender TEXT,
+        yrlvl TEXT,
+        PRIMARY KEY (studid)
+    ) ENGINE=InnoDB """,
+    
+    """CREATE TABLE IF NOT EXISTS subjects (
+        subjid INT NOT NULL,
+        subjcode TEXT,
+        subjdesc TEXT,
+        subjunits INT,
+        subjsched TEXT,
+        PRIMARY KEY (subjid)
+    ) ENGINE=InnoDB """,
+    
+    """CREATE TABLE IF NOT EXISTS teachers (
+        tid INT NOT NULL,
+        tname TEXT,
+        tdept TEXT,
+        tadd TEXT,
+        tcontact TEXT,
+        tstatus TEXT,
+        PRIMARY KEY (tid)
+    ) ENGINE=InnoDB """,
+    
+    """CREATE TABLE IF NOT EXISTS assign (
+        SubjID INT NOT NULL,
+        TID INT NOT NULL,
+        UNIQUE KEY (SubjID),
+        KEY (TID),
+        FOREIGN KEY (SubjID) REFERENCES subjects (subjid),
+        FOREIGN KEY (TID) REFERENCES teachers (tid)
+    ) ENGINE=InnoDB """,
+    
+    """CREATE TABLE IF NOT EXISTS enroll (
+        eid INT NOT NULL AUTO_INCREMENT,
+        studid INT,
+        subjid INT,
+        evaluation TEXT,
+        PRIMARY KEY (eid),
+        UNIQUE KEY (studid, subjid),
+        KEY (subjid),
+        FOREIGN KEY (studid) REFERENCES students (studid),
+        FOREIGN KEY (subjid) REFERENCES subjects (subjid)
+    ) ENGINE=InnoDB """,
+    
+    """CREATE TABLE IF NOT EXISTS grades (
+        gradeid INT NOT NULL AUTO_INCREMENT,
+        enroll_eid INT NOT NULL,
+        prelim TEXT,
+        midterm TEXT,
+        prefinal TEXT,
+        final TEXT,
+        PRIMARY KEY (gradeid),
+        UNIQUE KEY (enroll_eid),
+        FOREIGN KEY (enroll_eid) REFERENCES enroll (eid)
+    ) ENGINE=InnoDB """
+]
+
 try:
-    # connects to the mysql server
     conn = mysql.connector.connect(
         host="localhost",
-        user="root",
-        password="root",
-        database="enrollmentsystem"
+        user=dbuser,
+        password=dbpass,
+        database=selected_db_from_index
     )
-
-    # allow execution of sql queries
+    
     cursor = conn.cursor()
 
     # don't use auto increment lol...
@@ -170,8 +252,16 @@ try:
             border-radius: 6px;
         }
         #logoutbtn{
-            margin-top: 8px;
-            color: purple;
+            background-color: white;
+            color: red;
+        }
+        .nav-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .nav-bar form {
+            margin: 0;
         }
         </style>
         
@@ -199,6 +289,13 @@ try:
             }
         }
         
+        function confirmLogout() {
+            if (confirm("Are you sure you want to logout?")) {
+                window.location.href = "index.py?action=logout";
+            }
+            return false;
+        }
+        
         // run this function when the subjects form is loaded
         window.addEventListener("load", updateUrl);
         
@@ -216,16 +313,24 @@ try:
         </div>
         <tr>
             <td colspan="2" style="padding: 10px 5px;">
-                <a id="studentformurl" href="students.py">Students</a>
-                <span>Subjects</span>
-                <a id="teacherformurl" href="teachers.py">Teachers</a>
-                <select name="createdbcombo" id="createdbcombo">
-                    <option value="createdb">Create DB</option>
-                    <option value="1stsem">1st Sem</option>
-                    <option value="2ndsem">2nd Sem</option>
-                    <option value="summer">Summer</option>
-                </select><br>
-                <a href="index.py" id="logoutbtn">Logout</a>
+                <div class="nav-bar">
+                    <a id="studentformurl" href="students.py">Students</a>
+                    <span>Subjects</span>
+                    <a id="teacherformurl" href="teachers.py">Teachers</a>
+                    
+                    <form method="post" action="subjects.py">                        
+                        <select name="createdbcombo" id="createdbcombo" onchange="this.form.submit()"> <!-- submit the selected value -->
+                            <option value="">Create DB</option>
+                            <option value="1stsem">1st Sem</option>
+                            <option value="2ndsem">2nd Sem</option>
+                            <option value="summer">Summer</option>
+                        </select><br>
+                        <input type="hidden" name="action" value="createdb">
+                    </form>
+                        
+                    <a href="#" id="logoutbtn" onclick="confirmLogout();">Logout</a>
+                    <span id="currentuser">CURRENT USER: """+dbuser+"""
+                </div>
             </td>
         </tr>
         <tr>
@@ -266,6 +371,73 @@ try:
                         <th># of Students</th>
                     </tr>
     """)
+    
+    # get the value that was pressed in the combo box
+    if action == "createdb" and createdbcombo != "":
+        dbname = f"{createdbcombo}_sy{current_year}_{next_year}"
+        
+        try:
+            conn_createdb = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="root"
+            )
+            cursor_createdb = conn_createdb.cursor()
+                   
+            # if it already exists, do nothing   
+            cursor_createdb.execute("SHOW DATABASES LIKE %s", (dbname,))
+            if cursor_createdb.fetchone():
+                print(f"<h3>{dbname} already exists</h3>")
+            else:
+                cursor_createdb.execute(f"CREATE DATABASE `{dbname}`")
+                conn_createdb.commit()
+                
+            # after the database is created, insert the schema structure (tables)
+            conn_tables = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="root",
+                database=dbname
+            )
+            cursor_tables = conn_tables.cursor()                       
+            for table_sql in tables:
+                cursor_tables.execute(table_sql)
+            conn_tables.commit()
+            
+            # for convenience, premade subjects with schedules
+            subjects_data = [
+                (2000, 'aa', 'aa', 12, 'MWF 08:20-09:20'),
+                (2001, 'bb', 'bb', 5,  'MWF 11:35-12:35'),
+                (2002, 'cc', 'cc', 3,  'MWF 10:30-11:30'),
+                (2003, 'dd', 'dd', 3,  'TTH 10:30-11:30'),
+                (2004, 'ee', 'ee', 2,  'MWF 09:30-10:25'),
+                (2005, 'ff', 'ff', 5,  'TTH 08:20-09:20'),
+                (2006, 'gg', 'gg', 3,  'TTH 09:30-10:25'),
+                (2007, 'hh', 'hh', 12, 'MWF 11:00-12:00'),
+                (2008, 'ii', 'ii', 2,  'MWF 09:00-11:00'),
+                (2009, 'kk', 'kk', 5,  'TTH 10:40-11:25')
+            ]
+            for subject in subjects_data:
+                cursor_tables.execute(
+                    "INSERT INTO subjects (subjid, subjcode, subjdesc, subjunits, subjsched) VALUES (%s, %s, %s, %s, %s)",
+                    subject
+                )
+            conn_tables.commit()
+    
+            print(f"""
+                <script>
+                    alert("Database {dbname} successfully.");
+                </script>
+            """)
+    
+        except Exception as e:
+            print(f"<pre>{e}</pre>")
+
+        finally:
+            if 'conn_createdb' in locals():
+                conn_createdb.close()
+            if 'conn_tables' in locals():
+                conn_tables.close()
 
     # clicking a row fills the form fields/input boxes
     for i in range(len(rows)):
@@ -276,7 +448,7 @@ try:
         subjsched_val = html.escape(str(rows[i][4]))
         enrolledcount = str(rows[i][5])
 
-        urlsubjappend = str(rows[i][0])
+        # urlsubjappend = str(rows[i][0])
 
         print(
             "<tr onclick=\"fillForm('{}')\" style=\"cursor:pointer;\">"
