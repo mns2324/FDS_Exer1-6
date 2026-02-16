@@ -66,7 +66,9 @@ if action == "login":
         cursor = conn.cursor()
         
         cursor.execute("SHOW DATABASES LIKE '%_sy____\_____'") 
-        school_year_dbs = [row[0] for row in cursor.fetchall()]      
+        school_year_dbs = [row[0] for row in cursor.fetchall()]    
+        if not school_year_dbs:
+            school_year_dbs.insert(0, "enrollmentsystem") 
         accessible_dbs = []          
         
         if dbuser and dbpass:
