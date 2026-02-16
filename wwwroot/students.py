@@ -5,7 +5,22 @@ import mysql.connector
 import html
 import traceback
 from datetime import datetime
+import os 
+import http.cookies
 
+cookies = http.cookies.SimpleCookie(os.environ.get("HTTP_COOKIE", ""))
+
+dbuser = cookies["dbuser"].value if "dbuser" in cookies else ""
+dbpass = cookies["dbpass"].value if "dbpass" in cookies else ""
+selected_db_from_index = cookies["schoolyearcombo"].value if "schoolyearcombo" in cookies else "enrollmentsystem"
+
+# redirect back to index if not logged in
+if not dbuser or not dbpass:
+    print("Status: 302 Found")
+    print("Location: index.py")
+    print()
+    exit()
+    
 print("Content-Type: text/html\n")
 
 form = cgi.FieldStorage()
@@ -20,8 +35,6 @@ studaddress= html.escape(form.getvalue("studaddress", ""))
 studcourse = html.escape(form.getvalue("studcourse", ""))
 studgender = html.escape(form.getvalue("studgender", ""))
 yearlevel = form.getvalue("yearlevel", "")
-
-schoolyearcombo = form.getvalue("schoolyearcombo", "")
 
 # for the create db combo box
 createdbcombo = form.getvalue("createdbcombo", "")
@@ -91,30 +104,22 @@ tables = [
     ) ENGINE=InnoDB """
 ]
 
-dbuser = form.getvalue("dbuser", "")
-dbpass = form.getvalue("dbpass", "")
-
-if schoolyearcombo:
-    target_database = schoolyearcombo
-else:
-    target_database = "enrollmentsystem"
-
 try:
-    # connects to the mysql server
     conn = mysql.connector.connect(
         host="localhost",
         user=dbuser,
         password=dbpass,
-        database=target_database
+        database=selected_db_from_index
     )
-    root_conn = mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="root"
-    )
+    if action in ("insert", "delete"):
+        root_conn = mysql.connector.connect(
+            host="localhost",
+            user="root",
+            password="root"
+        )
+        root_cursor = root_conn.cursor()
 
-    # allow execution of sql queries
-    cursor = conn.cursor()
+    cursor = conn.cursor()  
 
     # get next student id (no auto increment)
     cursor.execute("SELECT COALESCE(MAX(studid), 999) + 1 FROM students")
@@ -122,7 +127,7 @@ try:
 
     # crud operations 
     if action == "insert" and studname and studaddress and studcourse and studgender and yearlevel:
-        studuser = f"{next_studid}{studname.replace(' ', '').lower()}" # force lowercase and remove whitespace
+        studuser = f"{next_studid}{studname.strip().lower()}" # remove whitespace and force lowercase
         studpw = f"AdDU{studname}"
 
         cursor.execute(
@@ -131,9 +136,8 @@ try:
         )
         conn.commit()
 
-        root_cursor = root_conn.cursor()
-        root_cursor.execute(f"CREATE USER IF NOT EXISTS '{studuser}'@'localhost' IDENTIFIED BY '{studpw}'")
-        root_cursor.execute(f"GRANT SELECT ON {target_database}.* TO '{studuser}'@'localhost'")
+        root_cursor.execute("CREATE USER IF NOT EXISTS %s@`localhost` IDENTIFIED BY %s", (studuser, studpw))
+        root_cursor.execute("GRANT SELECT ON `{}`.* TO %s@`localhost`".format(selected_db_from_index), (studuser,))
         root_conn.commit()
 
     elif action == "update" and studid and studname and studaddress and studcourse and studgender and yearlevel:
@@ -145,42 +149,33 @@ try:
 
     elif action == "delete" and studid:
         try:
-            studuser = f"{studid}{studname.replace(' ', '').lower()}" 
-
-            cursor.execute( "DELETE FROM students WHERE studid=%s", (studid,) )
+            studuser = f"{studid}{studname.strip().lower()}"
+            
+            # delete from table first
+            cursor.execute("DELETE FROM students WHERE studid = %s", (studid,))
             conn.commit()
-
-            root_cursor = root_conn.cursor()
-
+            
+            # try revoking access from the selected db
             try:
-                root_cursor.execute(f"REVOKE SELECT ON {target_database}.* FROM '{studuser}'@'localhost'")
+                root_cursor.execute("REVOKE SELECT ON `{}`.* FROM %s@`localhost`".format(selected_db_from_index), (studuser,))
                 root_conn.commit()
             except mysql.connector.Error:
-                # If revoke fails (user doesn't have grants on this db), continue
                 pass
             
-            # Check if user still has access to ANY other databases
-            root_cursor.execute(f"SHOW GRANTS FOR '{studuser}'@'localhost'")
+            # check if they still have access to other dbs. if not, we can now drop them
+            root_cursor.execute(f"SHOW GRANTS FOR `{studuser}`@`localhost`") # show grants doesnt allow %s
             grants = root_cursor.fetchall()
-            
-            # If user only has USAGE grant (no actual database permissions), delete the user
-            has_database_access = False
-            for grant in grants:
-                grant_str = str(grant[0])
-                # Check if there are any database-specific grants other than USAGE
-                if "ON `" in grant_str and "USAGE" not in grant_str:
-                    has_database_access = True
-                    break
-            
-            if not has_database_access:
-                # User has no remaining database access, safe to drop
-                root_cursor.execute(f"DROP USER IF EXISTS '{studuser}'@'localhost'")
+            remaining_db_access = any(" ON `" in grant[0] and "_sy`." in grant[0] for grant in grants)      
+            if not remaining_db_access:
+                root_cursor.execute(
+                    f"DROP USER IF EXISTS `{studuser}`@`localhost`"
+                )
                 root_conn.commit()
 
-        except Exception:
+        except mysql.connector.Error:
             print(f"""
                 <script>
-                    alert("Unable to delete student {studid} as they still have enrolled subjects.");
+                    alert("Unable to delete student {studid}. They may still have enrolled subjects.");
                 </script>
             """)
         
@@ -262,6 +257,17 @@ try:
         conflict_msg = result[3] 
         conflict_msg_js = html.escape(conflict_msg)
         
+    # close root connection after the crud operations
+    if 'root_cursor' in locals():
+        root_cursor.close()
+    if 'root_conn' in locals():
+        root_conn.close()
+        
+    # print(f"<h3>DEBUG students.py</h3>")
+    # print(f"user: {dbuser}<br>")
+    # print(f"pass: {dbpass}<br>")
+    # print(f"db: {selected_db_from_index}<br>")
+    
     print("""
     <html>
     <head>
@@ -326,13 +332,11 @@ try:
         .nav-bar form {
             margin: 0;
         }
-
         </style>
         
         <script>
         const enrolledsubjects = """ + str(enrolled_subj_ids) + """;
         const conflictMessage = """ + f'"{conflict_msg_js}"' + """;
-        const schoolyearcombo = """ + f'"{html.escape(schoolyearcombo)}"' + """;
 
         // show conflict message dynamically
         function showConflictMessage(msg) {
@@ -358,8 +362,7 @@ try:
             const subjid = params.get("subjid");
             
             // reload page with both IDs so the window load func can run checkconflict
-            let newUrl = `students.py?studid=${studid}`;
-            if (subjid) newUrl += `&subjid=${subjid}`;
+            const newUrl = subjid ? `students.py?studid=${studid}&subjid=${subjid}` : `students.py?studid=${studid}`;
             window.location.href = newUrl;
         }
         
@@ -369,13 +372,13 @@ try:
            
            // set the hidden action to enrollstudent then execute
            document.getElementById('action').value = 'enrollstudent';
-           document.getElementById("studentForm").submit();
+           document.querySelector("form").submit();
         }
         
         function dropStudent() {
             // set the hidden action to dropstudent then execute
             document.getElementById('action').value = 'dropstudent';
-            document.getElementById("studentForm").submit();
+            document.querySelector("form").submit();
         }
         
         function selectSubjectToDrop(enrolledsubjid) {
@@ -389,10 +392,17 @@ try:
                 enrollbtn.style.display = "none";
                 dropbtn.style.display = "inline-block";
                 dropbtn.value = `Drop Student ID: ${studid} from Subject ID: ${enrolledsubjid}`;
-
+                
                 // store this in the hidden form field for dropSubject()
                 document.getElementById('subjid').value = enrolledsubjid;
             }
+        }
+        
+        function confirmLogout() {
+            if (confirm("Are you sure you want to logout?")) {
+                window.location.href = "index.py?action=logout";
+            }
+            return false;
         }
         
         window.addEventListener("load", () => {
@@ -439,7 +449,7 @@ try:
                     <a href="subjects.py">Subjects</a>
                     <a href="teachers.py">Teachers</a>
                     
-                    <form id="createDbForm" action="students.py" method="post">                        
+                    <form method="post" action="students.py">                        
                         <select name="createdbcombo" id="createdbcombo" onchange="this.form.submit()"> <!-- submit the selected value -->
                             <option value="">Create DB</option>
                             <option value="1stsem">1st Sem</option>
@@ -449,19 +459,16 @@ try:
                         <input type="hidden" name="action" value="createdb">
                     </form>
                     
-                    <a href="index.py" id="logoutbtn">Logout</a>
+                    <a href="#" id="logoutbtn" onclick="confirmLogout();">Logout</a>
+                    <span id="currentuser">CURRENT USER: """+dbuser+"""
                 </div>
             </td>
         </tr>
         <tr>
             <td width="30%" valign="top">
                 <h3>Student Form</h3>
-
-                <!-- big fyi: since there are now 2 forms in this file, an id is required
-                so that .submit() recognizes the correct form to submit to keep the logic working
-                (earlier it was only submitting the form that was first in order [createdb]) -->
-
-                <form id="studentForm" action="students.py" method="post">
+                <!-- submit data back to this script -->
+                <form action="students.py" method="post">
                     Student ID:<br>
                     <input type="text" name="studid" id="studid" readonly value="""+studid_val+"""><br>
                     Student Name:<br>
@@ -520,34 +527,48 @@ try:
             # if it already exists, do nothing   
             cursor_createdb.execute("SHOW DATABASES LIKE %s", (dbname,))
             if cursor_createdb.fetchone():
-                print(f"""
-                    <script>
-                        alert("{dbname} already exists.");
-                    </script>
-                """)
+                print(f"<h3>{dbname} already exists</h3>")
             else:
                 cursor_createdb.execute(f"CREATE DATABASE `{dbname}`")
-                conn_createdb.commit()                    
-                          
-                conn_tables = mysql.connector.connect(
-                    host="localhost",
-                    user="root",
-                    password="root",
-                    database=dbname
+                conn_createdb.commit()
+                
+            # after the database is created, insert the schema structure (tables)
+            conn_tables = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="root",
+                database=dbname
+            )
+            cursor_tables = conn_tables.cursor()                       
+            for table_sql in tables:
+                cursor_tables.execute(table_sql)
+            conn_tables.commit()
+            
+            # for convenience, premade subjects with schedules
+            subjects_data = [
+                (2000, 'aa', 'aa', 12, 'MWF 08:20-09:20'),
+                (2001, 'bb', 'bb', 5,  'MWF 11:35-12:35'),
+                (2002, 'cc', 'cc', 3,  'MWF 10:30-11:30'),
+                (2003, 'dd', 'dd', 3,  'TTH 10:30-11:30'),
+                (2004, 'ee', 'ee', 2,  'MWF 09:30-10:25'),
+                (2005, 'ff', 'ff', 5,  'TTH 08:20-09:20'),
+                (2006, 'gg', 'gg', 3,  'TTH 09:30-10:25'),
+                (2007, 'hh', 'hh', 12, 'MWF 11:00-12:00'),
+                (2008, 'ii', 'ii', 2,  'MWF 09:00-11:00'),
+                (2009, 'kk', 'kk', 5,  'TTH 10:40-11:25')
+            ]
+            for subject in subjects_data:
+                cursor_tables.execute(
+                    "INSERT INTO subjects (subjid, subjcode, subjdesc, subjunits, subjsched) VALUES (%s, %s, %s, %s, %s)",
+                    subject
                 )
-                cursor_tables = conn_tables.cursor()   
-                        
-                for table_sql in tables:
-                    cursor_tables.execute(table_sql)
-                conn_tables.commit()
-        
-                print(f"""
-                    <script>
-                        alert("Database {dbname} created successfully.");
-                    </script>
-                """)
-                    
-                conn_tables.close()
+            conn_tables.commit()
+    
+            print(f"""
+                <script>
+                    alert("Database {dbname} successfully.");
+                </script>
+            """)
     
         except Exception as e:
             print(f"<pre>{e}</pre>")
@@ -557,9 +578,10 @@ try:
                 conn_createdb.close()
             if 'conn_tables' in locals():
                 conn_tables.close()
-
+                
     # clicking a row fills the form fields/input boxes
     for i in range(len(rows)):
+        # studid, studname, studaddress, studcourse, studgender, yearlevel
         studid_val = str(rows[i][0])
         studname_val = str(rows[i][1])
         studaddress_val = html.escape(str(rows[i][2]))
