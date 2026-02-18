@@ -58,7 +58,7 @@ CREATE TABLE `enroll` (
   KEY `subjid` (`subjid`),
   CONSTRAINT `enroll_ibfk_1` FOREIGN KEY (`studid`) REFERENCES `students` (`studid`),
   CONSTRAINT `enroll_ibfk_2` FOREIGN KEY (`subjid`) REFERENCES `subjects` (`subjid`)
-) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=23 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -100,6 +100,29 @@ LOCK TABLES `grades` WRITE;
 UNLOCK TABLES;
 
 --
+-- Table structure for table `oldsched`
+--
+
+DROP TABLE IF EXISTS `oldsched`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `oldsched` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `osched` text,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `oldsched`
+--
+
+LOCK TABLES `oldsched` WRITE;
+/*!40000 ALTER TABLE `oldsched` DISABLE KEYS */;
+/*!40000 ALTER TABLE `oldsched` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
 -- Table structure for table `students`
 --
 
@@ -123,7 +146,6 @@ CREATE TABLE `students` (
 
 LOCK TABLES `students` WRITE;
 /*!40000 ALTER TABLE `students` DISABLE KEYS */;
-INSERT INTO `students` VALUES (1000,'213','123','123','123','2'),(1001,'123123','12323','23','245','23'),(1002,'234','d','d','d','2'),(1003,'123123','12323','23','245','23');
 /*!40000 ALTER TABLE `students` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -178,10 +200,8 @@ CREATE TABLE `teachers` (
 
 LOCK TABLES `teachers` WRITE;
 /*!40000 ALTER TABLE `teachers` DISABLE KEYS */;
-INSERT INTO `teachers` VALUES (3000,'a','a','a','a','a'),(3001,'x','x','x','x','x'),(3002,'a','a','a','a','a');
 /*!40000 ALTER TABLE `teachers` ENABLE KEYS */;
 UNLOCK TABLES;
-
 --
 -- Dumping routines for database 'enrollmentsystem'
 --
@@ -324,4 +344,4 @@ DELIMITER ;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-01-29 22:30:06
+-- Dump completed on 2026-02-17 20:59:10
