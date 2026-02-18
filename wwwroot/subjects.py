@@ -26,15 +26,13 @@ print("Content-Type: text/html\n")
 form = cgi.FieldStorage()
 action = form.getvalue("action", "")
 
-tid = form.getvalue("tid", "")
-selected_subjid = form.getvalue("subjid")
-conflict_msg = ""
+studid = form.getvalue("studid", "")
+subjid, selected_subjid = form.getvalue("subjid", ""), form.getvalue("subjid", "")
 
-tname = html.escape(form.getvalue("tname", ""))
-tdept = html.escape(form.getvalue("tdept", ""))
-tadd = html.escape(form.getvalue("tadd", ""))
-tcontact = html.escape(form.getvalue("tcontact", ""))
-tstatus = form.getvalue("tstatus", "")
+subjcode = html.escape(form.getvalue("subjcode", ""))
+subjdesc = html.escape(form.getvalue("subjdesc", ""))
+subjunits = html.escape(form.getvalue("subjunits", ""))
+subjsched = html.escape(form.getvalue("subjsched", ""))
 
 # for the create db combo box
 createdbcombo = form.getvalue("createdbcombo", "")
@@ -48,35 +46,21 @@ try:
         password=dbpass,
         database=selected_db_from_index
     )
-    if action in ("insert", "delete"):
-        root_conn = mysql.connector.connect(
-            host="localhost",
-            user="root",
-            password="root"
-        )
-        root_cursor = root_conn.cursor()
-        
+    
     cursor = conn.cursor()
 
-    # get next student id (no auto increment)
-    cursor.execute("SELECT COALESCE(MAX(tid), 2999) + 1 FROM teachers")
-    next_tid = cursor.fetchone()[0]
- 
-    # crud operations 
-    if action == "insert" and tname and tdept and tadd and tcontact and tstatus:
-        try:
-            teachuser = f"{next_tid}{tname.strip().lower()}" # force lowercase and remove whitespace
-            teachpw = f"AdDU{tname}"
+    # don't use auto increment lol...
+    cursor.execute("SELECT COALESCE(MAX(subjid), 1999) + 1 FROM subjects")
+    next_subjid = cursor.fetchone()[0]
 
+    # insert, update, delete to sql
+    if action == "insert" and subjcode and subjdesc and subjunits and subjsched:
+        try:
             cursor.execute(
-                "INSERT INTO teachers (tid, tname, tdept, tadd, tcontact, tstatus) VALUES (%s, %s, %s, %s, %s, %s)",
-                (next_tid, tname, tdept, tadd, tcontact, tstatus)
+                "INSERT INTO subjects (subjid, subjcode, subjdesc, subjunits, subjsched) VALUES (%s, %s, %s, %s, %s)",
+                (next_subjid, subjcode, subjdesc, subjunits, subjsched)
             )
             conn.commit()
-
-            root_cursor.execute("CREATE USER IF NOT EXISTS %s@'localhost' IDENTIFIED BY %s",(teachuser, teachpw))
-            root_cursor.execute("GRANT SELECT, INSERT, UPDATE, EXECUTE ON `{}`.* TO %s@'localhost'".format(selected_db_from_index), (teachuser,))
-            root_conn.commit()
         except mysql.connector.Error:
             # student users don't have insert permissions
             if dbuser[:4].isdigit():
@@ -84,130 +68,94 @@ try:
                 if 999 < id < 2000:
                     print(f"""
                         <script>
-                            alert("Unable to insert student {tid}. You do not have the granted permissions.");
+                            alert("Unable to insert subject {subjid}. You do not have the granted permissions.");
                         </script>
                     """)
 
-    elif action == "update" and tid and tname and tdept and tadd and tcontact and tstatus:
+    elif action == "update" and subjid and subjcode and subjdesc and subjunits and subjsched:
         cursor.execute(
-            "UPDATE teachers SET tname=%s, tdept=%s, tadd=%s, tcontact=%s, tstatus=%s WHERE tid=%s",
-            (tname, tdept, tadd, tcontact, tstatus, tid)
+            "UPDATE subjects SET subjcode=%s, subjdesc=%s, subjunits=%s, subjsched=%s WHERE subjid=%s",
+            (subjcode, subjdesc, subjunits, subjsched, subjid)
         )
         conn.commit()
 
-    elif action == "delete" and tid:
+    elif action == "delete" and subjid:
         try:
-            teachuser = f"{tid}{tname.strip().lower()}"
-            
-            # check if they still have assigned subjects
-            cursor.execute("SELECT COUNT(*) FROM assign WHERE tid = %s", (tid,))
-            if cursor.fetchone()[0] > 0:
-                print(f"""
-                    <script>
-                        alert("Unable to delete teacher {tid}. They still have assigned subjects.");
-                    </script>
-                """)
-            else:
-                cursor.execute("DELETE FROM teachers WHERE tid = %s", (tid,))
-                conn.commit()
-
-                # try revoking perms from the selected db
-                try:
-                    root_cursor.execute("REVOKE SELECT, INSERT, UPDATE, EXECUTE ON `{}`.* FROM %s@`localhost`".format(selected_db_from_index), (teachuser,))
-                    root_conn.commit()
-                except mysql.connector.Error:
-                    pass
-                
-                # check if they still have perms for other dbs. if not, we can now drop them
-                root_cursor.execute(f"SHOW GRANTS FOR `{teachuser}`@`localhost`")
-                grants = root_cursor.fetchall()
-                remaining_access = any(" ON `" in grant[0] for grant in grants)
-                if not remaining_access:
-                    root_cursor.execute(
-                        f"DROP USER IF EXISTS `{teachuser}`@`localhost`"
-                    )
-                    root_conn.commit()   
-                
+            cursor.execute( "DELETE FROM subjects WHERE subjid=%s", (subjid,) )
+            conn.commit()
         except mysql.connector.Error:
-            # check first if the user isn't root (every user doesn't have delete perms) then show the first error. 
+            # only root has delete perms
             if dbuser != "root":
                 print(f"""
                     <script>
-                        alert("Unable to delete teacher {tid}. You do not have the granted permissions.");
+                        alert("Unable to delete subject {subjid}. You do not have the granted permissions.");
                     </script>
                 """)
-            # else:
-            #     print(f"""
-            #         <script>
-            #             alert("Unable to delete teacher {tid} as they still have assigned subjects.");
-            #         </script>
-            #     """)
-        
-    elif action == "assignteacher" and tid and selected_subjid: 
-        # check for schedule conflict/teacher already assigned
-        result = cursor.callproc('checkconflict', [tid, selected_subjid, 1, None])
-        conflict_msg = result[3]   
-        
-        if conflict_msg == "No conflict":
-            cursor.execute(
-                "INSERT INTO assign (subjid, tid) VALUES (%s, %s)",
-                (selected_subjid, tid)
-            )
-            conn.commit()
 
-    elif action == "unassignteacher" and tid and selected_subjid:
-        cursor.execute(
-            "DELETE FROM assign WHERE tid=%s AND subjid=%s",
-            (tid, selected_subjid)
-        )
-        conn.commit()
-        
-    # read all records from teachers table
-    cursor.execute("SELECT tid, tname, tdept, tadd, tcontact, tstatus FROM teachers")
+    # read all records from subjects, even those with no enrollees
+    cursor.execute("""
+        SELECT 
+            s.subjid,
+            s.subjcode,
+            s.subjdesc,
+            s.subjunits,
+            s.subjsched,
+            COUNT(e.studid) AS enrolledcount
+        FROM subjects s
+        LEFT JOIN enroll e ON e.subjid = s.subjid
+        GROUP BY s.subjid
+    """)
     rows = cursor.fetchall()
     
-    # bandaid fix for window.location.href reloading the site after the input fields are populated
-    selectedteacher = None
-    if tid:
-        cursor.execute(
-            "SELECT tid, tname, tdept, tadd, tcontact, tstatus FROM teachers WHERE tid=%s",
-            (tid,)
-        )
-        selectedteacher = cursor.fetchone()
+    # show what subject id is currently selected + update table to show # of students
+    if selected_subjid:
+        heading = f"Students Enrolled in Subject ID: {html.escape(selected_subjid)}"
 
-    if selectedteacher:
-        tid_val = str(selectedteacher[0])
-        tname_val = html.escape(selectedteacher[1])
-        tdept_val = html.escape(selectedteacher[2])
-        tadd_val = html.escape(selectedteacher[3])
-        tcontact_val = html.escape(selectedteacher[4])
-        tstatus_val = html.escape(selectedteacher[5])
+        cursor.execute(
+            "SELECT COUNT(*) FROM enroll WHERE subjid = %s",
+            (selected_subjid,)
+        )
+        studenrolledcount = cursor.fetchone()[0] # extract only the int from the tuple
+
+        # cursor.execute(
+        #     "SELECT subjid, subjcode, subjdesc, subjunits, subjsched FROM subjects WHERE subjid=%s",
+        #     (selected_subjid,)
+        # )
+        # selectedsubject = cursor.fetchone()
     else:
-        tid_val = str(next_tid)
-        tname_val = tdept_val = tadd_val = tcontact_val = tstatus_val = ""
-
-    # get the data to populate the assigned subjects table for the selected teacher
-    assignedsubjects = []
-    if tid:
-        cursor.execute(
-            """SELECT a.subjid, s.subjcode, s.subjdesc, s.subjunits, s.subjsched 
-               FROM assign a JOIN subjects s ON a.subjid = s.subjid 
-               WHERE a.tid=%s""",
-            (tid,)
-        )
-        assignedsubjects = cursor.fetchall()
-
-    # for hiding assign button for teachers already assigned to a subject
-    assigned_subj_ids = [str(s[0]) for s in assignedsubjects]
-    # for showing the conflict message span
-    conflict_msg_js = ""
-    
-    # page load check - check conflict to control message and button visibility
-    if tid and selected_subjid:
-        result = cursor.callproc('checkconflict', [tid, selected_subjid, 1, None])
-        conflict_msg = result[3] 
-        conflict_msg_js = html.escape(conflict_msg)
+        heading = "Students Enrolled in Subject ID: (not selected yet)"
+        studenrolledcount = 0
         
+    # fix for window.location.href reloading the site after the input fields are populated
+    selectedsubject = None
+    if selected_subjid:
+        cursor.execute(
+            "SELECT subjid, subjcode, subjdesc, subjunits, subjsched FROM subjects WHERE subjid=%s",
+            (selected_subjid,)
+        )
+        selectedsubject = cursor.fetchone()
+
+    if selectedsubject:
+        subjid_val = str(selectedsubject[0])
+        subjcode_val = html.escape(selectedsubject[1])
+        subjdesc_val = html.escape(selectedsubject[2])
+        subjunits_val = str(selectedsubject[3])
+        subjsched_val = html.escape(selectedsubject[4])
+    else:
+        subjid_val = str(next_subjid)
+        subjcode_val = subjdesc_val = subjunits_val = subjsched_val = ""
+        
+    # get the data to populate the enrolled students table for the selected subject
+    enrolledstudents = []
+    if selected_subjid:
+        cursor.execute(
+            """SELECT s.studid, s.studname, s.studadd, s.studcrs, s.studgender, s.yrlvl
+                FROM enroll e JOIN students s ON e.studid = s.studid
+                WHERE e.subjid=%s""",
+            (selected_subjid,)
+        )
+        enrolledstudents = cursor.fetchall()
+
     print("""
     <html>
     <head>
@@ -274,66 +222,27 @@ try:
         }
         </style>
         
-        <script>       
-        const assignedsubjects = """ + str(assigned_subj_ids) + """;
-        const conflictMessage = """ + f'"{conflict_msg_js}"' + """;
-        
-        // show conflict message dynamically
-        function showConflictMessage(msg) {
-            const span = document.getElementById("conflictmsg");
-            span.textContent = msg;
-            if(msg && msg !== "No conflict") {
-                span.style.display = "inline";
-            } else {
-                span.style.display = "none";
-            }
-        }
+        <script>  
         
         // copies data into the input fields to allow updating
-        function fillFormTeachers(tid, tname, tdept, tadd, tcontact, tstatus) {
-            document.getElementById("tid").value = tid;
-            document.getElementById("tname").value = tname;
-            document.getElementById("tdept").value = tdept;
-            document.getElementById("tadd").value = tadd;
-            document.getElementById("tcontact").value = tcontact;
-            document.getElementById("tstatus").value = tstatus;
-                 
+        function fillForm(subjid) {
+            document.getElementById("subjid").value = subjid;
+            document.getElementById("changesubjid").innerText = "Students Enrolled in Subject ID: " + subjid;
+
+            window.location.href = `subjects.py?subjid=${subjid}`;       
+            updateUrl();
+        }
+            
+        function updateUrl() {
+            // grab the subjects url, get the current subjid, then append it to the students href
             const params = new URLSearchParams(window.location.search);
             const subjid = params.get("subjid");
+            const studentlink = document.getElementById("studentformurl");
+            const teacherlink = document.getElementById("teacherformurl");
             
-            // reload page with both IDs so the server can run checkconflict
-            const newUrl = subjid ? `teachers.py?tid=${tid}&subjid=${subjid}` : `teachers.py?tid=${tid}`;
-            window.location.href = newUrl;
-        }
-        
-        function assignTeacher() {
-           const params = new URLSearchParams(window.location.search);
-           document.getElementById('subjid').value = params.get('subjid');
-           
-           // set the hidden action to assignteacher then execute
-           document.getElementById('action').value = 'assignteacher';
-           document.getElementById("teacherForm").submit();
-        }
-        
-        function unassignTeacher() {
-            document.getElementById('action').value = 'unassignteacher';
-            document.getElementById("teacherForm").submit();
-        }
-        
-        function selectSubjectToUnassign(enrolledsubjid) {
-            const params = new URLSearchParams(window.location.search);
-            const tid = params.get('tid');
-            const assign = document.getElementById("assignbtn");
-            const unassign = document.getElementById("unassignbtn");
-            
-            // show the dropbtn ONLY if you select a teacher then one assigned subject
-            if (tid && enrolledsubjid) {
-                assign.style.display = "none";
-                unassign.style.display = "inline-block";
-                unassign.value = `Unassign Teacher ID: ${tid} from Subject ID: ${enrolledsubjid}`;
-                
-                // store this in the hidden form field for dropSubject()
-                document.getElementById('subjid').value = enrolledsubjid;
+            if (subjid) {
+                studentlink.href = `students.py?subjid=${subjid}`;
+                teacherlink.href = `teachers.py?subjid=${subjid}`;
             }
         }
         
@@ -344,34 +253,12 @@ try:
             return false;
         }
         
-        window.addEventListener("load", () => {
-            const params = new URLSearchParams(window.location.search);
-            const subjid = params.get("subjid");
-            const tid = params.get("tid");
-            
-            const assignbtn = document.getElementById("assignbtn");
-            document.getElementById("unassignbtn").style.display = "none";
-
-            // assign button logic: need both a teacher and subject selected
-            if (subjid && tid) {
-                // already assigned to this subject
-                if (assignedsubjects.includes(subjid)) {
-                    assignbtn.style.display = "none";
-                // schedule conflict exists, hide button, show message
-                } else if (conflictMessage && conflictMessage !== "No conflict") {
-                    assignbtn.style.display = "none";
-                    showConflictMessage(conflictMessage);
-                // no conflict and not yet assigned 
-                } else {
-                    assignbtn.style.display = "inline-block";
-                    assignbtn.value = `Assign Teacher ID: ${tid} to Subject ID: ${subjid}`;
-                }
-            } else {
-                assignbtn.style.display = "none";
-            }
-        });
-        </script>
+        // run this function when the subjects form is loaded
+        window.addEventListener("load", updateUrl);
+        
+        </script>        
     </head>
+
     <body>
     <table width="100%" cellpadding="10">
         <div class="header">
@@ -384,11 +271,11 @@ try:
         <tr>
             <td colspan="2" style="padding: 10px 5px;">
                 <div class="nav-bar">
-                    <a href="students.py">Students</a>
-                    <a href="subjects.py">Subjects</a>
-                    <span>Teachers</span>
+                    <a id="studentformurl" href="students.py">Students</a>
+                    <span>Subjects</span>
+                    <a id="teacherformurl" href="teachers.py">Teachers</a>
                     
-                    <form action="teachers.py" method="post" id="createDbForm">                        
+                    <form method="post" action="subjects.py">                        
                         <select name="createdbcombo" id="createdbcombo" onchange="this.form.submit()"> <!-- submit the selected value -->
                             <option value="">Create DB</option>
                             <option value="1stsem">1st Sem</option>
@@ -397,58 +284,48 @@ try:
                         </select><br>
                         <input type="hidden" name="action" value="createdb">
                     </form>
-                    
+                        
                     <a href="#" id="logoutbtn" onclick="confirmLogout();">Logout</a>
-                    <span>CURRENT USER: """+dbuser+"""
+                    <span id="currentuser">CURRENT USER: """+dbuser+"""
                 </div>
             </td>
         </tr>
         <tr>
             <td width="30%" valign="top">
-                <h3>Teachers Form</h3>
-                
-                <!-- big fyi: since there are now 2 forms in this file, an id is required
-                so that .submit() recognizes the correct form to submit to keep the logic working
-                (earlier it was only submitting the form that was first in order [createdb]) -->
-                
-                <form action="teachers.py" method="post" id="teacherForm">
-                    Teacher ID:<br>
-                    <input type="text" name="tid" id="tid" readonly value="""+tid_val+"""><br>
-                    Teacher Name:<br>
-                    <input type="text" name="tname" id="tname" value="""+tname_val+"""><br>
-                    Teacher Department:<br>
-                    <input type="text" name="tdept" id="tdept" value="""+tdept_val+"""><br><br>
-                    Teacher Address:<br>
-                    <input type="text" name="tadd" id="tadd" value="""+tadd_val+"""><br><br>
-                    Teacher Contact:<br>
-                    <input type="text" name="tcontact" id="tcontact" value="""+tcontact_val+"""><br><br>
-                    Teacher Status:<br>
-                    <input type="text" name="tstatus" id="tstatus" value="""+tstatus_val+"""><br><br>
-                    
-                    <!-- insert,update,delete buttons -->
+                <h3>Subjects Form</h3>
+                <!-- submit data back to this script -->
+                <form action="subjects.py" method="post">
+                    Subject ID:<br>
+                    <input type="text" name="subjid" id="subjid" value="""+subjid_val+""" readonly><br>
+                    Subject Code:<br>
+                    <input type="text" name="subjcode" id="subjcode" value="""+subjcode_val+"""><br>
+                    Description:<br>
+                    <!-- add literal quotes here to preserve values with spaces -->
+                    <input type="text" name="subjdesc" id="subjdesc" value=\""""+subjdesc_val+"""\"><br><br>
+                    Units:<br>
+                    <input type="number" name="subjunits" id="subjunits" value="""+subjunits_val+"""><br><br>
+                    Schedule:<br>
+                    <!-- add literal quotes here to preserve values with spaces -->
+                    <input type="text" name="subjsched" id="subjsched" value=\""""+subjsched_val+"""\"><br><br>
+
+                    <input type="hidden" name="action" id="action">
+                  
                     <input type="submit" value="Insert" onclick="document.getElementById('action').value='insert'">
                     <input type="submit" value="Update" onclick="document.getElementById('action').value='update'">
                     <input type="submit" value="Delete" onclick="document.getElementById('action').value='delete'">
-                    <!-- form.submit will send the data back -->
-                    <input type="button" id="assignbtn" value="" style="display:none;" onclick="assignTeacher()">
-                    <input type="button" id="unassignbtn" value="" style="display:none;" onclick="unassignTeacher()"><br><br>
-                    <span id="conflictmsg" style="color:red;"></span>
-                    
-                    <input type="hidden" name="action" id="action" value="">
-                    <input type="hidden" name="subjid" id="subjid">
                 </form>
             </td>
 
             <td width="70%" valign="top">
-                <h3>Teachers Table for: """+conn.database+"""</h3>
+                <h3>Subjects Table for: """+conn.database+"""</h3>
                 <table border="1" cellpadding="5" cellspacing="0" width="100%">
                     <tr>
-                        <th>Teacher ID</th>
-                        <th>Name</th>
-                        <th>Department</th>
-                        <th>Address</th>
-                        <th>Contact</th>
-                        <th>Status</th>
+                        <th>ID</th>
+                        <th>Code</th>
+                        <th>Description</th>
+                        <th>Units</th>
+                        <th>Schedule</th>
+                        <th># of Students</th>
                     </tr>
     """)
     
@@ -518,27 +395,27 @@ try:
         finally:
             if 'conn_createdb' in locals():
                 conn_createdb.close()
-                
+
     # clicking a row fills the form fields/input boxes
     for i in range(len(rows)):
-        tid_val = str(rows[i][0])
-        tname_val = str(rows[i][1])
-        tdept_val = html.escape(str(rows[i][2]))
-        tadd_val = html.escape(str(rows[i][3]))
-        tcontact_val = html.escape(str(rows[i][4]))
-        tstatus_val = str(rows[i][5])
+        subjid_val = str(rows[i][0])
+        subjcode_val = html.escape(str(rows[i][1]))
+        subjdesc_val = html.escape(str(rows[i][2]))
+        subjunits_val = str(rows[i][3])
+        subjsched_val = html.escape(str(rows[i][4]))
+        enrolledcount = str(rows[i][5])
 
         print(
-            "<tr onclick=\"fillFormTeachers('{}','{}','{}','{}','{}','{}')\" style=\"cursor:pointer;\">"
-            .format(tid_val, tname_val, tdept_val, tadd_val, tcontact_val, tstatus_val)
+            "<tr onclick=\"fillForm('{}')\" style=\"cursor:pointer;\">"
+            .format(subjid_val)
         )
-        print("<td>" + tid_val + "</td>")
-        print("<td>" + tname_val + "</td>")
-        print("<td>" + tdept_val + "</td>")
-        print("<td>" + tadd_val + "</td>")
-        print("<td>" + tcontact_val + "</td>")
-        print("<td>" + tstatus_val + "</td>")
-        print("</tr>") # close the table row
+        print("<td>" + subjid_val + "</td>")
+        print("<td>" + subjcode_val + "</td>")
+        print("<td>" + subjdesc_val + "</td>")
+        print("<td>" + subjunits_val + "</td>")
+        print("<td>" + subjsched_val + "</td>")
+        print("<td>" + enrolledcount + "</td>")
+        print("</tr>")
 
     print("""
                 </table>
@@ -548,37 +425,39 @@ try:
         <tr>
             <td width="30%"></td> <!-- empty cell to align with form -->
             <td width="70%" valign="top">
-                <h3>Assigned Subjects</h3>
+                <h3 id="changesubjid">""" + heading + """</h3>
                 <table border="1" cellpadding="5" cellspacing="0" width="100%">
                     <tr>
-                        <th>Subject ID</th>
-                        <th>Code</th>
-                        <th>Description</th>
-                        <th>Units</th>
-                        <th>Schedule</th>
-                    </tr>                 
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Address</th>
+                        <th>Course</th>
+                        <th>Gender</th>
+                        <th>Year Level</th>
+                    </tr>
         """)
-    
-    # clicking a teacher shows their assigned subjects
-    for subject in assignedsubjects:
-        subjid_val = str(subject[0])
-        subjcode_val = html.escape(str(subject[1]))
-        subjdesc_val = html.escape(str(subject[2]))
-        subjunits_val = str(subject[3])
-        subjsched_val = html.escape(str(subject[4]))
-        print(f"<tr onclick=\"selectSubjectToUnassign('{subjid_val}')\" style=\"cursor:pointer;\">")
-        print("<td>" + subjid_val + "</td>")
-        print("<td>" + subjcode_val + "</td>")
-        print("<td>" + subjdesc_val + "</td>")
-        print("<td>" + subjunits_val + "</td>")
-        print("<td>" + subjsched_val + "</td>")
+        
+    # clicking a subject shows all students currently enrolled in it
+    for student in enrolledstudents:
+        studid_val = str(student[0])
+        studname_val = str(student[1])
+        studaddress_val = html.escape(str(student[2]))
+        studcourse_val = html.escape(str(student[3]))
+        studgender_val = html.escape(str(student[4]))
+        yearlevel_val = str(student[5])
+        print("<tr style=\"cursor:pointer;\">")
+        print("<td>" + studid_val + "</td>")
+        print("<td>" + studname_val + "</td>")
+        print("<td>" + studaddress_val + "</td>")
+        print("<td>" + studcourse_val + "</td>")
+        print("<td>" + studgender_val + "</td>")
+        print("<td>" + yearlevel_val + "</td>")
         print("</tr>") 
         
     print("""
                 </table>
             </td>
-        </tr>
-        
+        </tr>       
     </table>
     </body>
     </html>
@@ -594,3 +473,4 @@ except Exception:
 finally:
     if 'conn' in locals():
         conn.close()
+
