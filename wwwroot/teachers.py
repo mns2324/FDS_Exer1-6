@@ -40,69 +40,6 @@ tstatus = form.getvalue("tstatus", "")
 createdbcombo = form.getvalue("createdbcombo", "")
 current_year = str(datetime.now().year)
 next_year = str(datetime.now().year + 1)
-tables = [
-    """CREATE TABLE IF NOT EXISTS students (
-        studid INT NOT NULL,
-        studname TEXT NOT NULL,
-        studadd TEXT,
-        studcrs TEXT,
-        studgender TEXT,
-        yrlvl TEXT,
-        PRIMARY KEY (studid)
-    ) ENGINE=InnoDB """,
-    
-    """CREATE TABLE IF NOT EXISTS subjects (
-        subjid INT NOT NULL,
-        subjcode TEXT,
-        subjdesc TEXT,
-        subjunits INT,
-        subjsched TEXT,
-        PRIMARY KEY (subjid)
-    ) ENGINE=InnoDB """,
-    
-    """CREATE TABLE IF NOT EXISTS teachers (
-        tid INT NOT NULL,
-        tname TEXT,
-        tdept TEXT,
-        tadd TEXT,
-        tcontact TEXT,
-        tstatus TEXT,
-        PRIMARY KEY (tid)
-    ) ENGINE=InnoDB """,
-    
-    """CREATE TABLE IF NOT EXISTS assign (
-        SubjID INT NOT NULL,
-        TID INT NOT NULL,
-        UNIQUE KEY (SubjID),
-        KEY (TID),
-        FOREIGN KEY (SubjID) REFERENCES subjects (subjid),
-        FOREIGN KEY (TID) REFERENCES teachers (tid)
-    ) ENGINE=InnoDB """,
-    
-    """CREATE TABLE IF NOT EXISTS enroll (
-        eid INT NOT NULL AUTO_INCREMENT,
-        studid INT,
-        subjid INT,
-        evaluation TEXT,
-        PRIMARY KEY (eid),
-        UNIQUE KEY (studid, subjid),
-        KEY (subjid),
-        FOREIGN KEY (studid) REFERENCES students (studid),
-        FOREIGN KEY (subjid) REFERENCES subjects (subjid)
-    ) ENGINE=InnoDB """,
-    
-    """CREATE TABLE IF NOT EXISTS grades (
-        gradeid INT NOT NULL AUTO_INCREMENT,
-        enroll_eid INT NOT NULL,
-        prelim TEXT,
-        midterm TEXT,
-        prefinal TEXT,
-        final TEXT,
-        PRIMARY KEY (gradeid),
-        UNIQUE KEY (enroll_eid),
-        FOREIGN KEY (enroll_eid) REFERENCES enroll (eid)
-    ) ENGINE=InnoDB """
-]
 
 try:
     conn = mysql.connector.connect(
@@ -127,18 +64,29 @@ try:
  
     # crud operations 
     if action == "insert" and tname and tdept and tadd and tcontact and tstatus:
-        teachuser = f"{next_tid}{tname.strip().lower()}" # force lowercase and remove whitespace
-        teachpw = f"AdDU{tname}"
+        try:
+            teachuser = f"{next_tid}{tname.strip().lower()}" # force lowercase and remove whitespace
+            teachpw = f"AdDU{tname}"
 
-        cursor.execute(
-            "INSERT INTO teachers (tid, tname, tdept, tadd, tcontact, tstatus) VALUES (%s, %s, %s, %s, %s, %s)",
-            (next_tid, tname, tdept, tadd, tcontact, tstatus)
-        )
-        conn.commit()
+            cursor.execute(
+                "INSERT INTO teachers (tid, tname, tdept, tadd, tcontact, tstatus) VALUES (%s, %s, %s, %s, %s, %s)",
+                (next_tid, tname, tdept, tadd, tcontact, tstatus)
+            )
+            conn.commit()
 
-        root_cursor.execute("CREATE USER IF NOT EXISTS %s@'localhost' IDENTIFIED BY %s",(teachuser, teachpw))
-        root_cursor.execute("GRANT SELECT, INSERT, UPDATE, EXECUTE ON `{}`.* TO %s@'localhost'".format(selected_db_from_index), (teachuser,))
-        root_conn.commit()
+            root_cursor.execute("CREATE USER IF NOT EXISTS %s@'localhost' IDENTIFIED BY %s",(teachuser, teachpw))
+            root_cursor.execute("GRANT SELECT, INSERT, UPDATE, EXECUTE ON `{}`.* TO %s@'localhost'".format(selected_db_from_index), (teachuser,))
+            root_conn.commit()
+        except mysql.connector.Error:
+            # student users don't have insert permissions
+            if dbuser[:4].isdigit():
+                id = int(dbuser[:4])
+                if 999 < id < 2000:
+                    print(f"""
+                        <script>
+                            alert("Unable to insert student {tid}. You do not have the granted permissions.");
+                        </script>
+                    """)
 
     elif action == "update" and tid and tname and tdept and tadd and tcontact and tstatus:
         cursor.execute(
@@ -150,17 +98,50 @@ try:
     elif action == "delete" and tid:
         try:
             teachuser = f"{tid}{tname.strip().lower()}"
+            
+            # check if they still have assigned subjects
+            cursor.execute("SELECT COUNT(*) FROM assign WHERE tid = %s", (tid,))
+            if cursor.fetchone()[0] > 0:
+                print(f"""
+                    <script>
+                        alert("Unable to delete teacher {tid}. They still have assigned subjects.");
+                    </script>
+                """)
+            else:
+                cursor.execute("DELETE FROM teachers WHERE tid = %s", (tid,))
+                conn.commit()
 
-            cursor.execute( "DELETE FROM teachers WHERE tid=%s", (tid,) )
-            cursor.execute(f"REVOKE SELECT, INSERT, UPDATE, EXECUTE ON enrollmentsystem.* TO '{teachuser}'@'localhost'")
-            cursor.execute(f"DROP USER IF EXISTS '{teachuser}'@'localhost'")
-            conn.commit()
-        except Exception:
-            print(f"""
-                <script>
-                    alert("Unable to delete teacher {tid} as they still have assigned subjects.");
-                </script>
-            """)
+                # try revoking perms from the selected db
+                try:
+                    root_cursor.execute("REVOKE SELECT, INSERT, UPDATE, EXECUTE ON `{}`.* FROM %s@`localhost`".format(selected_db_from_index), (teachuser,))
+                    root_conn.commit()
+                except mysql.connector.Error:
+                    pass
+                
+                # check if they still have perms for other dbs. if not, we can now drop them
+                root_cursor.execute(f"SHOW GRANTS FOR `{teachuser}`@`localhost`")
+                grants = root_cursor.fetchall()
+                remaining_access = any(" ON `" in grant[0] for grant in grants)
+                if not remaining_access:
+                    root_cursor.execute(
+                        f"DROP USER IF EXISTS `{teachuser}`@`localhost`"
+                    )
+                    root_conn.commit()   
+                
+        except mysql.connector.Error:
+            # check first if the user isn't root (every user doesn't have delete perms) then show the first error. 
+            if dbuser != "root":
+                print(f"""
+                    <script>
+                        alert("Unable to delete teacher {tid}. You do not have the granted permissions.");
+                    </script>
+                """)
+            # else:
+            #     print(f"""
+            #         <script>
+            #             alert("Unable to delete teacher {tid} as they still have assigned subjects.");
+            #         </script>
+            #     """)
         
     elif action == "assignteacher" and tid and selected_subjid: 
         # check for schedule conflict/teacher already assigned
@@ -226,7 +207,7 @@ try:
         result = cursor.callproc('checkconflict', [tid, selected_subjid, 1, None])
         conflict_msg = result[3] 
         conflict_msg_js = html.escape(conflict_msg)
-
+        
     print("""
     <html>
     <head>
@@ -331,12 +312,12 @@ try:
            
            // set the hidden action to assignteacher then execute
            document.getElementById('action').value = 'assignteacher';
-           document.querySelector("form").submit();
+           document.getElementById("teacherForm").submit();
         }
         
         function unassignTeacher() {
             document.getElementById('action').value = 'unassignteacher';
-            document.querySelector("form").submit();
+            document.getElementById("teacherForm").submit();
         }
         
         function selectSubjectToUnassign(enrolledsubjid) {
@@ -407,7 +388,7 @@ try:
                     <a href="subjects.py">Subjects</a>
                     <span>Teachers</span>
                     
-                    <form method="post" action="teachers.py">                        
+                    <form action="teachers.py" method="post" id="createDbForm">                        
                         <select name="createdbcombo" id="createdbcombo" onchange="this.form.submit()"> <!-- submit the selected value -->
                             <option value="">Create DB</option>
                             <option value="1stsem">1st Sem</option>
@@ -425,8 +406,12 @@ try:
         <tr>
             <td width="30%" valign="top">
                 <h3>Teachers Form</h3>
-                <!-- submit data back to this script -->
-                <form action="teachers.py" method="post">
+                
+                <!-- big fyi: since there are now 2 forms in this file, an id is required
+                so that .submit() recognizes the correct form to submit to keep the logic working
+                (earlier it was only submitting the form that was first in order [createdb]) -->
+                
+                <form action="teachers.py" method="post" id="teacherForm">
                     Teacher ID:<br>
                     <input type="text" name="tid" id="tid" readonly value="""+tid_val+"""><br>
                     Teacher Name:<br>
@@ -467,7 +452,7 @@ try:
                     </tr>
     """)
     
-    # get the value that was pressed in the combo box
+    # get the value that was pressed in the combo box then make the database
     if action == "createdb" and createdbcombo != "":
         dbname = f"{createdbcombo}_sy{current_year}_{next_year}"
         
@@ -482,48 +467,50 @@ try:
             # if it already exists, do nothing   
             cursor_createdb.execute("SHOW DATABASES LIKE %s", (dbname,))
             if cursor_createdb.fetchone():
-                print(f"<h3>{dbname} already exists</h3>")
+                print(f"""
+                    <script>
+                        alert("{dbname} already exists.");
+                    </script>
+                """)
             else:
                 cursor_createdb.execute(f"CREATE DATABASE `{dbname}`")
                 conn_createdb.commit()
                 
-            # after the database is created, insert the schema structure (tables)
-            conn_tables = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="root",
-                database=dbname
-            )
-            cursor_tables = conn_tables.cursor()                       
-            for table_sql in tables:
-                cursor_tables.execute(table_sql)
-            conn_tables.commit()
-            
-            # for convenience, premade subjects with schedules
-            subjects_data = [
-                (2000, 'aa', 'aa', 12, 'MWF 08:20-09:20'),
-                (2001, 'bb', 'bb', 5,  'MWF 11:35-12:35'),
-                (2002, 'cc', 'cc', 3,  'MWF 10:30-11:30'),
-                (2003, 'dd', 'dd', 3,  'TTH 10:30-11:30'),
-                (2004, 'ee', 'ee', 2,  'MWF 09:30-10:25'),
-                (2005, 'ff', 'ff', 5,  'TTH 08:20-09:20'),
-                (2006, 'gg', 'gg', 3,  'TTH 09:30-10:25'),
-                (2007, 'hh', 'hh', 12, 'MWF 11:00-12:00'),
-                (2008, 'ii', 'ii', 2,  'MWF 09:00-11:00'),
-                (2009, 'kk', 'kk', 5,  'TTH 10:40-11:25')
-            ]
-            for subject in subjects_data:
-                cursor_tables.execute(
-                    "INSERT INTO subjects (subjid, subjcode, subjdesc, subjunits, subjsched) VALUES (%s, %s, %s, %s, %s)",
-                    subject
+                # clone tables from the original database "enrollmentsystem"         
+                cursor_createdb.execute(f"""
+                    SELECT table_name 
+                    FROM information_schema.tables 
+                    WHERE table_schema = %s
+                """, (selected_db_from_index,))
+                tables_to_clone = cursor_createdb.fetchall()
+
+                for (table_name,) in tables_to_clone:
+                    cursor_createdb.execute(
+                        f"CREATE TABLE `{dbname}`.`{table_name}` LIKE `{selected_db_from_index}`.`{table_name}`"
+                    )
+                    # copy the data from subjects only, leave the other tables empty
+                    if table_name == "subjects":
+                        cursor_createdb.execute(
+                            f"INSERT INTO `{dbname}`.`subjects` SELECT * FROM `{selected_db_from_index}`.`subjects`"
+                        )
+                
+                # clone checkconflict from the original database "enrollmentsystem"                
+                cursor_createdb.execute(
+                    "SHOW CREATE PROCEDURE `{}`.`checkconflict`".format(selected_db_from_index)
                 )
-            conn_tables.commit()
-    
-            print(f"""
-                <script>
-                    alert("Database {dbname} successfully.");
-                </script>
-            """)
+                proc_definition = cursor_createdb.fetchone()[2]
+                    
+                # replace the database name inside procedure definition
+                proc_definition = proc_definition.replace(f"`enrollmentsystem`", f"`{dbname}`")
+                # prevent "Warning: Could not clone procedure: 1046 (3D000): No database selected"
+                cursor_createdb.execute(f"USE `{dbname}`")
+                cursor_createdb.execute(proc_definition)
+   
+                print(f"""
+                    <script>
+                        alert("Database {dbname} successfully.");
+                    </script>
+                """)
     
         except Exception as e:
             print(f"<pre>{e}</pre>")
@@ -531,9 +518,7 @@ try:
         finally:
             if 'conn_createdb' in locals():
                 conn_createdb.close()
-            if 'conn_tables' in locals():
-                conn_tables.close()
-
+                
     # clicking a row fills the form fields/input boxes
     for i in range(len(rows)):
         tid_val = str(rows[i][0])
