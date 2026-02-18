@@ -70,6 +70,7 @@ if action == "login":
         if not school_year_dbs:
             school_year_dbs.insert(0, "enrollmentsystem") 
         accessible_dbs = []          
+        display_dbs = [] 
         
         if dbuser and dbpass:
             try:
@@ -81,34 +82,33 @@ if action == "login":
                 user_exists = True
                 
                 # return the list of databases that the user has access to
-                # for db in school_year_dbs:
-                #     try:
-                #         test_db_conn = mysql.connector.connect(
-                #             host="localhost",
-                #             user=dbuser,
-                #             password=dbpass,
-                #             database=db
-                #         )
-                #         accessible_dbs.append(db)
-                #         test_db_conn.close()
-                #     except mysql.connector.Error:
-                #         pass
+                for db in school_year_dbs:
+                    try:
+                        test_db_conn = mysql.connector.connect(
+                            host="localhost",
+                            user=dbuser,
+                            password=dbpass,
+                            database=db
+                        )
+                        accessible_dbs.append(db)
+                        test_db_conn.close()
+                    except mysql.connector.Error:
+                        pass
                     
                 test_conn.close()
                 
             except mysql.connector.Error:
                 login_fail = True
                 pass
-                
-        if user_exists == True:
+        
+        if user_exists:
             display_dbs = accessible_dbs
             
         # print(f"<h3>DEBUG</h3>")
-        # print(f"user_exists: {user_exists}<br>")
-        # print(f"accessible_dbs: {accessible_dbs}<br>")
-        # print("<h3>cookies: </h3>")
-        # for key in cookie:
-        #     print(f"{key} = {cookie[key].value}<br>")
+        print(f"user_exists: {user_exists}<br>")
+        print(f"accessible_dbs: {accessible_dbs}<br>")
+        print(f"display_dbs: {display_dbs}<br>")
+        print(f"school_year_dbs: {school_year_dbs}<br>")
 
          
         print("""
@@ -205,8 +205,8 @@ if action == "login":
                             <select name="schoolyearcombo">
         """)
             
-        # populate school year dropdown with available databases
-        for db in school_year_dbs:
+        # populate school year dropdown with available databases (depends on user)
+        for db in display_dbs:
             print(f'<option value="{db}">{db}</option>')
             
         print("""                                
