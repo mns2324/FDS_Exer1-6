@@ -21,6 +21,20 @@ if not dbuser or not dbpass:
     print()
     exit()
     
+# if student, redirect to studrec to show the pdf
+if dbuser[:4].isdigit() and 999 < int(dbuser[:4]) < 2000:
+    print("Status: 302 Found")
+    print("Location: studrec.py")
+    print()
+    exit()
+    
+# if teacher, redirect to encodegrades
+if dbuser[:4].isdigit() and 2999 < int(dbuser[:4]) < 4000:
+    print("Status: 302 Found")
+    print("Location: encodegrades.py")
+    print()
+    exit()
+    
 print("Content-Type: text/html\n")
 
 form = cgi.FieldStorage()
@@ -121,7 +135,7 @@ try:
                 # check if they still have perms for other dbs. if not, we can now drop them
                 root_cursor.execute(f"SHOW GRANTS FOR `{studuser}`@`localhost`")
                 grants = root_cursor.fetchall()
-                remaining_db_access = any(" ON `" in grant[0] and "_sy`." in grant[0] for grant in grants)   
+                remaining_db_access = any("GRANT SELECT ON `" in grant[0] and "_sy" in grant[0] for grant in grants)   
                 if not remaining_db_access:
                     root_cursor.execute(
                         f"DROP USER IF EXISTS `{studuser}`@`localhost`"
@@ -136,13 +150,7 @@ try:
                         alert("Unable to delete student {studid}. You do not have the granted permissions.");
                     </script>
                 """)
-            # else:
-            #     print(f"""
-            #         <script>
-            #             alert("Unable to delete student {studid}. They may still have enrolled subjects.");
-            #         </script>
-            #     """)
-        
+
     elif action == "enrollstudent" and studid and selected_subjid:  
         # check for schedule conflict
         result = cursor.callproc('checkconflict', [studid, selected_subjid, 0, None])
@@ -623,5 +631,4 @@ except Exception:
 finally:
     if 'conn' in locals():
         conn.close()
-
 
