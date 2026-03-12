@@ -34,6 +34,7 @@ subjid = form.getvalue("subjid", "")
 
 currentstudent = None
 subjects = []
+submitted = False
 
 try:
     conn = mysql.connector.connect(
@@ -45,13 +46,14 @@ try:
     cursor = conn.cursor()
 
     # submit evaluation for this specific subject
-    evaltext = html.escape(form.getvalue("evaltext", ""))
+    evaltext = form.getvalue("evaltext", "")
     if action == "submitcomment" and studid and evaltext:
         cursor.execute(
             "UPDATE enroll SET evaluation = %s WHERE studid = %s AND subjid = %s",
             (evaltext, studid, subjid)
         )
         conn.commit()
+        submitted = True
 
     # fetch student info
     if studid:
@@ -154,6 +156,19 @@ print("""
         .nav-bar form {
             margin: 0;
         }
+        textarea {
+            width: 100%;
+            max-width: 500px;
+            height: 100px;
+        }
+        #submitsuccess {
+            border:2px solid green; 
+            padding: 8px;
+            width: fit-content;
+            color: green;
+            display: """ + ('block' if submitted else 'none') + """;
+            margin-top: 10px;
+        }
         </style>
 </head>
 <body>
@@ -171,6 +186,7 @@ print("""
     <a href="studrec.py">Back to Student Record</a>
 </div>
 
+<p id="submitsuccess">Comment submitted successfully!</p>
 <h2>Student Information</h2>
 <table>
     <tr>
@@ -214,9 +230,10 @@ print("""
 
 <p>Your Evaluation/Comments</p>
 <form action="evaluate.py" method="post" id="evalForm">
-    <textarea id="evaltext">Enter your thoughts here...</textarea><br><br>
+    <textarea id="evaltext" name="evaltext" placeholder="Enter your thoughts here..."></textarea><br><br>
     <input type=submit value="Submit Comment" onclick="document.getElementById('action').value='submitcomment'">
-    <input type="hidden" name="studid" value="{studid_val}">
+    <input type="hidden" name="studid" value=""" + studid_val + """>
+    <input type="hidden" name="subjid" value=""" + str(subjid) + """>
     <input type="hidden" name="action" id="action" value="">
 </form>
 
