@@ -40,7 +40,7 @@ if action == "logout":
     expired_cookie["dbpass"] = ""
     expired_cookie["schoolyearcombo"] = ""
     
-    for key in cookie:
+    for key in expired_cookie:
         expired_cookie[key]["max-age"] = 0
         expired_cookie[key]["path"] = "/"
         
@@ -262,3 +262,4 @@ if action == "login":
         if 'conn' in locals():
             conn.close()
         
+
