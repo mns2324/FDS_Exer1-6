@@ -46,17 +46,13 @@ try:
         (studid,)
     )
     student = cursor.fetchone()
-    
-    # if not student:
-    #     sys.stdout.write("Content-Type: text/plain\r\n\r\nStudent record not found.")
-    #     sys.exit()
         
     # shorthand way of unpacking the student tuple into individual variables
     studid_val, studname_val, studcourse_val, yearlevel_val = student
     
     # show all subjects, even those with missing grades
     cursor.execute(
-        """SELECT s.subjid, s.subjcode, g.prelim, g.midterm, g.prefinal, g.final
+        """SELECT s.subjid, s.subjcode, g.prelim, g.midterm, g.prefinal, g.final, e.eid
            FROM enroll e
            JOIN subjects s ON e.subjid = s.subjid
            LEFT JOIN grades g ON g.enroll_eid = e.eid
@@ -131,13 +127,34 @@ try:
         ["Subject ID", "Subject Code", "Prelim", "Midterm", "Prefinal", "FINAL"],
     ]
     for row in subjects:
+        subjid = str(row[0])
+        subjcode = str(row[1])
+
+        prelim = row[2]
+        midterm = row[3]
+        prefinal = row[4]
+        final = row[5]
+        
+        eid = str(row[6])
+
+        # check if subject has at least one grade
+        has_grades = any(grade is not None for grade in [prelim, midterm, prefinal, final])
+
+        if has_grades:
+            subjid_display = Paragraph(
+                f'<link href="evaluate.py?subjid={subjid}&eid={eid}"><u><font color="blue">{subjid}</font></u></link>',
+                left_align
+            )
+        else:
+            subjid_display = subjid
+
         subjectdata.append([
-            str(row[0]),        # subjid
-            str(row[1]),        # subjcode
-            str(row[2] or ""),  # prelim
-            str(row[3] or ""),  # midterm
-            str(row[4] or ""),  # prefinal
-            str(row[5] or ""),  # final
+            subjid_display,
+            subjcode,
+            str(prelim or ""),
+            str(midterm or ""),
+            str(prefinal or ""),
+            str(final or "")
         ])
         
     studinfotable = Table(studentinfo, hAlign='LEFT')  
