@@ -18,23 +18,25 @@ if not dbuser or not dbpass:
     print("Location: index.py")
     print()
     exit()
-
 if not (dbuser[:4].isdigit() and 999 < int(dbuser[:4]) < 2000):
     print("Status: 302 Found")
     print("Location: index.py")
     print()
     exit()
 
-print("Content-Type: text/html\n")
-
 form = cgi.FieldStorage()
 action = form.getvalue("action", "")
 studid = int(dbuser[:4])
 subjid = form.getvalue("subjid", "")
+eid = form.getvalue("eid", "")
 
 currentstudent = None
 subjects = []
-submitted = False
+
+studid_val = ""
+studname_val = ""
+studcourse_val = ""
+yearlevel_val = ""
 
 try:
     conn = mysql.connector.connect(
@@ -44,24 +46,29 @@ try:
         database=selected_db_from_index
     )
     cursor = conn.cursor()
-
+    
     # submit evaluation for this specific subject
     evaltext = form.getvalue("evaltext", "")
     if action == "submitcomment" and studid and evaltext:
         cursor.execute(
-            "UPDATE enroll SET evaluation = %s WHERE studid = %s AND subjid = %s",
-            (evaltext, studid, subjid)
+            "UPDATE enroll SET evaluation = %s WHERE eid = %s AND studid = %s",
+            (evaltext, eid, studid)
         )
         conn.commit()
-        submitted = True
+        
+        print(f"Status: 302 Found")
+        print(f"Location: evaluate.py?subjid={subjid}&eid={eid}&submitted=1")
+        print()
+        exit()
+        
+        existing_eval = ""
 
-    # fetch student info
-    if studid:
-        cursor.execute(
-            "SELECT studid, studname, studcrs, yrlvl FROM students WHERE studid = %s",
-            (studid,)
-        )
-        currentstudent = cursor.fetchone()
+    # fetch student info to display on the page
+    cursor.execute(
+        "SELECT studid, studname, studcrs, yrlvl FROM students WHERE studid = %s",
+        (studid,)
+    )
+    currentstudent = cursor.fetchone()
 
     if currentstudent:
         studid_val      = str(currentstudent[0])
@@ -73,24 +80,24 @@ try:
 
     # fetch the single clicked subject's info
     cursor.execute(
-        """SELECT s.subjid, s.subjcode, s.subjdesc, s.subjunits, s.subjsched
+        """SELECT s.subjid, s.subjcode, s.subjdesc, s.subjunits, s.subjsched, e.eid, e.evaluation
            FROM enroll e
            JOIN subjects s ON e.subjid = s.subjid
-           WHERE e.studid = %s AND e.subjid = %s""",
-        (studid, subjid)
+           WHERE e.eid = %s AND e.studid = %s""",
+        (eid, studid)
     )
     subjects = cursor.fetchall()
 
-# displays database/runtime errors if there are any, shows line number of error
 except Exception:
     tb = traceback.format_exc()
     print("<h2>Error</h2>")
     print(f"<pre>{tb}</pre>")
 
-# ensure database connection is closed
 finally:
     if 'conn' in locals():
         conn.close()
+        
+print("Content-Type: text/html\n")
 
 print("""
 <html>
@@ -166,53 +173,65 @@ print("""
             padding: 8px;
             width: fit-content;
             color: green;
-            display: """ + ('block' if submitted else 'none') + """;
+            display: none;
             margin-top: 10px;
         }
         </style>
-</head>
-<body>
+        <script>
+            window.addEventListener("load", () => {
+                const params = new URLSearchParams(window.location.search);
+                
+                // show save popup if evaluation was submitted
+                if (params.get("submitted") === "1") {
+                    const popup = document.getElementById("submitsuccess");
+                    popup.style.display = "block";
+                    setTimeout(() => { popup.style.display = "none"; }, 4000);
+                }
+            });
+        </script>
+    </head>
+    <body>
 
-<div class="header">
-    <img src="catgulp.jpg">
-    <div class="header-text">
-        <h1>STUDENT INFORMATION SYSTEM</h1>
-        <span>UNIVERSITY NAME</span>
+    <div class="header">
+        <img src="catgulp.jpg">
+        <div class="header-text">
+            <h1>STUDENT INFORMATION SYSTEM</h1>
+            <span>UNIVERSITY NAME</span>
+        </div>
     </div>
-</div>
 
-<div class="nav-bar">
-    <span>CURRENT USER: """+dbuser+""" /// CURRENT DATABASE: """+selected_db_from_index+"""</span>
-    <a href="studrec.py">Back to Student Record</a>
-</div>
+    <div class="nav-bar">
+        <br><br>
+        <span>CURRENT USER: """+dbuser+""" /// CURRENT DATABASE: """+selected_db_from_index+"""</span>
+    </div>
 
-<p id="submitsuccess">Comment submitted successfully!</p>
-<h2>Student Information</h2>
-<table>
-    <tr>
-        <th>ID</th>
-        <th>Name</th>
-        <th>Course</th>
-        <th>Year Level</th>
-    </tr>
-    <tr>
-        <td>"""+studid_val+"""</td>
-        <td>"""+studname_val+"""</td>
-        <td>"""+studcourse_val+"""</td>
-        <td>"""+yearlevel_val+"""</td>
-    </tr>
-</table>
+    <a href="studrec.py">Back to Student Record</a> 
+    <h2>Student Information</h2>
+    <table>
+        <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Course</th>
+            <th>Year Level</th>
+        </tr>
+        <tr>
+            <td>"""+studid_val+"""</td>
+            <td>"""+studname_val+"""</td>
+            <td>"""+studcourse_val+"""</td>
+            <td>"""+yearlevel_val+"""</td>
+        </tr>
+    </table>
 
-<h2>Subject Information</h2>
-<table>
-    <tr>
-        <th>ID</th>
-        <th>Code</th>
-        <th>Description</th>
-        <th>Units</th>
-        <th>Schedule</th>
-    </tr>
-""")
+    <h2>Subject Information</h2>
+    <table>
+        <tr>
+            <th>ID</th>
+            <th>Code</th>
+            <th>Description</th>
+            <th>Units</th>
+            <th>Schedule</th>
+        </tr>
+    """)
 
 for subj in subjects:
     print(f"""
@@ -226,17 +245,19 @@ for subj in subjects:
     """)
 
 print("""
-</table>
+    </table>
 
-<p>Your Evaluation/Comments</p>
-<form action="evaluate.py" method="post" id="evalForm">
-    <textarea id="evaltext" name="evaltext" placeholder="Enter your thoughts here..."></textarea><br><br>
-    <input type=submit value="Submit Comment" onclick="document.getElementById('action').value='submitcomment'">
-    <input type="hidden" name="studid" value=""" + studid_val + """>
-    <input type="hidden" name="subjid" value=""" + str(subjid) + """>
-    <input type="hidden" name="action" id="action" value="">
-</form>
+    <p>Your Evaluation/Comments</p>
+    <p id="submitsuccess">Comment submitted successfully!</p>
+    <form action="evaluate.py" method="post" id="evalForm">
+        <textarea id="evaltext" name="evaltext" placeholder="Enter your thoughts here..."></textarea><br><br>
+        <input type=submit value="Submit Comment" onclick="document.getElementById('action').value='submitcomment'">
+        
+        <input type="hidden" name="eid" value=""" + html.escape(str(eid)) + """>
+        <input type="hidden" name="subjid" value=""" + html.escape(str(subjid)) + """>
+        <input type="hidden" name="action" id="action" value="">
+    </form>
 
-</body>
-</html>
+    </body>
+    </html>
 """)
