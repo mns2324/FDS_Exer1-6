@@ -6,6 +6,16 @@ import html
 import traceback
 import os
 import http.cookies
+import json
+
+def respond(status: str, payload: dict):
+    # MUST be the first output IIS sees
+    print(f"Status: {status}")
+    print("Content-Type: application/json; charset=utf-8")
+    print("Cache-Control: no-store")
+    print()
+    print(json.dumps(payload, ensure_ascii=False))
+    exit()
 
 cookies = http.cookies.SimpleCookie(os.environ.get("HTTP_COOKIE", ""))
 dbuser = cookies["dbuser"].value if "dbuser" in cookies else ""
@@ -29,6 +39,7 @@ action = form.getvalue("action", "")
 studid = int(dbuser[:4])
 subjid = form.getvalue("subjid", "")
 eid = form.getvalue("eid", "")
+evaltext = form.getvalue("evaltext", "")
 
 currentstudent = None
 subjects = []
@@ -37,6 +48,7 @@ studid_val = ""
 studname_val = ""
 studcourse_val = ""
 yearlevel_val = ""
+existing_eval = ""
 
 try:
     conn = mysql.connector.connect(
@@ -47,9 +59,14 @@ try:
     )
     cursor = conn.cursor()
     
-    # submit evaluation for this specific subject
-    evaltext = form.getvalue("evaltext", "")
-    if action == "submitcomment" and studid and evaltext:
+    # submit evaluation for this specific subject   
+    if action == "submitcomment" and studid:
+        if not evaltext:
+            respond("400 Bad Request", {"error": "Missing parameter: text"})
+
+        if len(evaltext) > 2000:
+            respond("413 Payload Too Large", {"error": "Text too long (max 2000 chars)"})
+                
         cursor.execute(
             "UPDATE enroll SET evaluation = %s WHERE eid = %s AND studid = %s",
             (evaltext, eid, studid)
@@ -60,8 +77,6 @@ try:
         print(f"Location: evaluate.py?subjid={subjid}&eid={eid}&submitted=1")
         print()
         exit()
-        
-        existing_eval = ""
 
     # fetch student info to display on the page
     cursor.execute(
@@ -206,6 +221,7 @@ print("""
     </div>
 
     <a href="studrec.py">Back to Student Record</a> 
+    <a href="index.py">Back to Home</a> 
     <h2>Student Information</h2>
     <table>
         <tr>
