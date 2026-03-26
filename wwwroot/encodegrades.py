@@ -328,6 +328,7 @@ try:
                             <th>Units</th>
                             <th>Schedule</th>
                             <th># of Enrolled Students</th>
+                            <th>StudEval</th>
                         </tr>
         """)
 
@@ -339,6 +340,7 @@ try:
         subjsched_val = html.escape(str(subject[4]))
         # get the enrolled count for the subject from the dict, 0 as default
         totalenrolled = str(enrolledcount.get(subjid_val, 0))
+        studeval_link = f'<a href="sentiment.py?subjid={subjid_val}">Open</a>'
         print(f'<tr id="subj{subjid_val}" onclick="selectSubject(\'{subjid_val}\')" style="cursor:pointer;">')
         print("<td>" + subjid_val + "</td>")
         print("<td>" + subjcode_val + "</td>")
@@ -346,6 +348,7 @@ try:
         print("<td>" + subjunits_val + "</td>")
         print("<td>" + subjsched_val + "</td>")
         print("<td>" + totalenrolled + "</td>")
+        print("<td>" + studeval_link + "</td>")
         print("</tr>") 
         
     print("""
