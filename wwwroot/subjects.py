@@ -155,6 +155,19 @@ try:
             (selected_subjid,)
         )
         enrolledstudents = cursor.fetchall()
+        
+    # fetch available school year databases for the train model modal
+    try:
+        root_conn_sy = mysql.connector.connect(host="localhost", user="root", password="root")
+        cursor = root_conn_sy.cursor()
+        cursor.execute("SHOW DATABASES LIKE '%\\_sy%'")
+        sy_dbs = [r[0] for r in cursor.fetchall()]
+        cursor.execute("SHOW DATABASES LIKE 'enrollmentsystem'")
+        sy_dbs += [r[0] for r in cursor.fetchall()]
+        cursor.close()
+    except Exception:
+        sy_dbs = []
+    sy_options = "".join(f'<option value="{db}">{db}</option>' for db in sy_dbs)
 
     print("""
     <html>
@@ -169,10 +182,12 @@ try:
             color: white;
         }
         table { 
-            border-collapse:collapse; 
+            border-collapse: separate; 
+            border-spacing: 0;
         }
         th, td, .header { 
-            border:2px solid white; padding:5px; 
+            border: 2px solid white; 
+            padding: 5px; 
         }
         .header {
             display: flex;
@@ -213,12 +228,48 @@ try:
             color: red;
         }
         .nav-bar {
+            margin-left: 8px;
             display: flex;
             align-items: center;
             gap: 8px;
         }
         .nav-bar form {
             margin: 0;
+        }
+        .nav-bar-right {
+            margin-left: auto; /* pushes it to the far right */
+            margin-right: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        th {
+            position: sticky;
+            top: 0;
+            background-color: #1f1f1f;
+            border-bottom: 2px solid white;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 9999; 
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.75); /* dark overlay */
+        }
+        .modal-content {
+            background-color: #1f1f1f;
+            padding: 20px;
+            border: 2px solid white;
+            border-radius: 10px;
+            width: 300px;
+            text-align: center;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
         }
         </style>
         
@@ -246,11 +297,19 @@ try:
             }
         }
         
-        function confirmLogout() {
-            if (confirm("Are you sure you want to logout?")) {
-                window.location.href = "index.py?action=logout";
+        function openTrainingModal() {
+            document.getElementById("trainModal").style.display = "flex";
+        }
+        
+        function trainModel() {
+            const db = document.getElementById("traindbselect").value;
+            if (!db) { 
+                alert("Please select a school year database."); 
+                return; 
             }
-            return false;
+            alert("Model trained successfully!\\nDatabase: " + db + "\\nValidation Accuracy: ");
+            
+            document.getElementById("trainModal").style.display = "none";
         }
         
         // run this function when the subjects form is loaded
@@ -285,8 +344,13 @@ try:
                         <input type="hidden" name="action" value="createdb">
                     </form>
                         
-                    <a href="#" id="logoutbtn" onclick="confirmLogout();">Logout</a>
-                    <span id="currentuser">CURRENT USER: """+dbuser+"""
+                    <button onclick="openTrainingModal()"> Train Model </button>
+                    
+                    <div class="nav-bar-right">
+                        <span id="currentuser">CURRENT USER: """+dbuser+"""</span>
+                        <a href="index.py?action=logout" id="logoutbtn" 
+                            onclick="return confirm('Are you sure you want to logout?');">Logout</a>                 
+                    </div>
                 </div>
             </td>
         </tr>
@@ -318,15 +382,16 @@ try:
 
             <td width="70%" valign="top">
                 <h3>Subjects Table for: """+conn.database+"""</h3>
-                <table border="1" cellpadding="5" cellspacing="0" width="100%">
-                    <tr>
-                        <th>ID</th>
-                        <th>Code</th>
-                        <th>Description</th>
-                        <th>Units</th>
-                        <th>Schedule</th>
-                        <th># of Students</th>
-                    </tr>
+                <div style="max-height: 375px; overflow-y: auto; display: block;">
+                    <table border="1" cellpadding="5" cellspacing="0" width="100%">
+                        <tr>
+                            <th>ID</th>
+                            <th>Code</th>
+                            <th>Description</th>
+                            <th>Units</th>
+                            <th>Schedule</th>
+                            <th># of Students</th>
+                        </tr>
     """)
     
     # get the value that was pressed in the combo box then make the database
@@ -418,7 +483,8 @@ try:
         print("</tr>")
 
     print("""
-                </table>
+                    </table>
+                </div>
             </td>
         </tr>
         
@@ -426,15 +492,16 @@ try:
             <td width="30%"></td> <!-- empty cell to align with form -->
             <td width="70%" valign="top">
                 <h3 id="changesubjid">""" + heading + """</h3>
-                <table border="1" cellpadding="5" cellspacing="0" width="100%">
-                    <tr>
-                        <th>ID</th>
-                        <th>Name</th>
-                        <th>Address</th>
-                        <th>Course</th>
-                        <th>Gender</th>
-                        <th>Year Level</th>
-                    </tr>
+                <div style="max-height: 375px; overflow-y: auto; display: block;">
+                    <table border="1" cellpadding="5" cellspacing="0" width="100%">
+                        <tr>
+                            <th>ID</th>
+                            <th>Name</th>
+                            <th>Address</th>
+                            <th>Course</th>
+                            <th>Gender</th>
+                            <th>Year Level</th>
+                        </tr>
         """)
         
     # clicking a subject shows all students currently enrolled in it
@@ -455,10 +522,28 @@ try:
         print("</tr>") 
         
     print("""
-                </table>
+                    </table>
+                </div>
             </td>
         </tr>       
     </table>
+    
+    <div id="trainModal" class="modal">
+        <div class="modal-content">
+            <h2>Select School Year as Training Data</h2>
+            <select id="traindbselect" style="width:100%; margin-bottom:12px;">
+                <option value="">-- Select a database --</option>
+                """ + sy_options + """
+            </select><br>
+            <input type="button" value="Train"
+                   style="border-color:#1a7a1a; color:#aaffaa; cursor:pointer; padding:6px 16px;"
+                   onclick="trainModel()">
+            <input type="button" value="Cancel"
+                   style="margin-left:8px; cursor:pointer; padding:6px 16px;"
+                   onclick="document.getElementById('trainModal').style.display='none'">
+        </div>
+    </div>
+    
     </body>
     </html>
     """)
@@ -473,4 +558,3 @@ except Exception:
 finally:
     if 'conn' in locals():
         conn.close()
-
